@@ -1,7 +1,7 @@
-# Individual Project Data to Model Pipeline (IPDMP)
+# Open-source Reservoir Identifier and Navigator (OpenResIN) 
 
 ## Description
-The Individual Project Data to Model Pipeline (IPDMP) is a Python-based project designed to automate the workflow of generating labeled training data from satellite imagery and using this data to train and deploy a machine learning model for water body identification.
+The Open-source Reservoir Identifier and Navigator (OpenResIN) is a Python-based project designed to automate the workflow of generating labeled training data from satellite imagery and using this data to train and deploy a machine learning model for water body identification.
 
 The pipeline consists of several key components:
 1.  **Navigable Automated Labelling Interface for Regions of Attention (NALIRA)** (`NALIRA.py`): Processes Sentinel-2 satellite imagery, calculates the Normalized Difference Water Index (NDWI), performs cloud masking, and provides an interactive graphical user interface (GUI) for manually labeling regions of interest (reservoirs, water bodies, land, and sea). It generates the initial labeled coordinates and segments the image data into smaller classified images (mini-chunks) used for training.
@@ -28,8 +28,8 @@ The overall goal is to provide a streamlined process from raw satellite data to 
 ## Installation
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/nicoarrroyo/ipdmp.git](https://github.com/nicoarrroyo/ipdmp.git)
-    cd IPDMP
+    git clone [https://github.com/nicoarrroyo/OpenResIN.git](https://github.com/nicoarrroyo/OpenResIN.git)
+    cd OpenResIN
     ```
 
 2.  **Install Required Libraries:**
@@ -55,7 +55,7 @@ The overall goal is to provide a streamlined process from raw satellite data to 
 To run the entire pipeline, follow these steps sequentially.
 
 **Assumptions:**
-* You have downloaded the IPDMP code.
+* You have downloaded the OpenResIN code.
 * You have downloaded a Sentinel-2 satellite image tile in `.SAFE` format.
 * You have downloaded the necessary masking files.
 
