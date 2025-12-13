@@ -50,24 +50,26 @@ Outputs:
     - Python list containing each calculated water index.
 """
 # %% Start
-# %%% External Library Imports
+# %%% Standard Libraries
 import time
 MAIN_START_TIME = time.monotonic()
 import os
+import csv
+
+# %%% Third Party Libraries
 import tensorflow as tf
 import numpy as np
-import csv
 from PIL import Image
 from omnicloudmask import predict_from_array
 import rasterio
 
-# %%% Internal Function Imports
+# %%% Local Libraries
 from data_handling import rewrite, blank_entry_check, check_file_permission
 from data_handling import extract_coords, change_to_folder, create_tf_example
 from data_handling import hash_tfrecord
 
-from image_handling import image_to_array, known_feature_mask, plot_indices
-from image_handling import plot_chunks, get_rgb_data, mask_urban_areas
+from image_handling import image_to_array, known_feature_mask, mask_urban_areas
+from image_handling import plot_indices, plot_chunks#, save_training_file
 
 from misc import get_sentinel_bands, split_array, combine_sort_unique
 
@@ -92,6 +94,7 @@ plot_size = (5, 5) # larger plots increase detail and pixel count
 plot_size_chunks = (7, 7)
 
 HOME = os.path.dirname(os.getcwd()) # HOME path is one level up from the cwd
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # %% General Mega Giga Function
 def get_sat(sat_name, sat_number):
