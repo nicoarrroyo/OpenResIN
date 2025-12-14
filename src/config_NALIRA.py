@@ -12,7 +12,7 @@ LABEL_DATA              = True
 DATA_FILE_NAME          = "responses_" + str(N_CHUNKS) + "_chunks.csv"
 
 TITLE_SIZE              = 8         # title size of plots
-LABEL_SIZE              = 4         # label size (axes) of plotsd
+LABEL_SIZE              = 4         # label size (axes) of plots
 PLOT_SIZE               = (5, 5)    # larger plots increase detail and pixel count
 PLOT_SIZE_CHUNKS        = (7, 7)
 
@@ -22,8 +22,14 @@ DATA_DIR = os.path.dirname(SRC_DIR)
 DATA_DIR = os.path.join(DATA_DIR, "data") 
 
 # -- Constants --
-BAND_MAP = {
+BAND_MAP_H = { # high-res version of band names
     "green": "B03",
     "red": "B04",
     "nir": "B08"
+}
+
+BAND_MAP_L = { # low-res version of band names
+    "green": "B03",
+    "red": "B04",
+    "nir": "B8A"
 }

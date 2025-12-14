@@ -77,7 +77,7 @@ from user_interfacing import table_print, prompt_roi, list_folders
 from user_interfacing import confirm_continue_or_exit
 
 import config as c
-from objects import sentinel_image
+from objects import SentinelImage
 
 
 table_print(n_chunks=c.N_CHUNKS, high_res=c.HIGH_RES, 
@@ -136,7 +136,9 @@ def one_create_image_arrays(folder_path):
      tile_number_field, _) = folder.split("_")
     
     prefix = f"{tile_number_field}_{datatake_start_sensing_time}"
-    bands = get_sentinel_bands(sat_number, HIGH_RES)
+    bands = get_sentinel_bands(sat_number, c.HIGH_RES)
+    
+    
     
     for band in bands:
         if c.HIGH_RES:
@@ -168,7 +170,71 @@ def one_create_image_arrays(folder_path):
     
     print("step 1 complete! finished at {dt.datetime.now().time()}")
     return
-def two_mask_known_feature():
+
+def two_mask_known_feature(image_arrays):
+    print("masking out known features")
+    
+    masking_path = os.path.join(c.HOME_DIR, "data", "masks")
+    
+    rivers_data = os.path.join(
+        masking_path, 
+        "rivers", 
+        "data", 
+        "WatercourseLink.shp"
+        )
+    
+    boundaries_data = os.path.join( # for masking the sea
+        masking_path, 
+        "boundaries", 
+        ("Regions_December_2024_Boundaries_EN_BSC_"
+        "-6948965129330885393.geojson")
+        )
+    
+    known_reservoirs_data = os.path.join(
+        masking_path, 
+        "known reservoirs", 
+        "LRR _EW_202307_v1", 
+        "SHP", 
+        "LRR_ENG_20230601_WGS84.shp" # WGS84 is more accurate than OSGB35
+        )
+    
+    urban_areas_data = os.path.join( # REMEMBER TO CITE SOURCE FROM README
+        masking_path, 
+        "urban areas", 
+        "CEH_GBLandCover_2024_10m", 
+        "data", 
+        "4dd9df19-8df5-41a0-9829-8f6114e28db1", 
+        "gblcm2024_10m.tif"
+        )
+    
+    for i in range(len(image_arrays)):
+        image_arrays[i] = known_feature_mask(
+            image_arrays[i], 
+            image_metadata, 
+            rivers_data, 
+            feature_type="rivers", 
+            buffer_metres=20
+            )
+        image_arrays[i] = known_feature_mask(
+            image_arrays[i], 
+            image_metadata, 
+            boundaries_data, 
+            feature_type="sea"
+            )
+        image_arrays[i] = known_feature_mask(
+            image_arrays[i], 
+            image_metadata, 
+            known_reservoirs_data, 
+            feature_type="known reservoirs", 
+            buffer_metres=50
+            )
+        image_arrays[i] = mask_urban_areas( # different process (.tif)
+            image_arrays[i], 
+            image_metadata, 
+            urban_areas_data
+            )
+    
+    print("step 2 complete! finished at {dt.datetime.now().time()}")
     return
 def three_mask_clouds():
     return
