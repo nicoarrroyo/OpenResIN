@@ -12,6 +12,8 @@ from rasterio import features
 from rasterio.windows import from_bounds
 from rasterio.warp import reproject, Resampling
 
+from data_handling import check_duplicate_name
+
 def image_to_array(file_path_s):
     """
     Convert an image or list of images to a numpy array. The image is opened 
@@ -380,6 +382,8 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i, title_size,
     
     plt.tight_layout()
     plt.show()
+
+#def save_image_file(data, image_name)
 
 def get_rgb_data(data, chunk_n, coordinates, g_min, g_max):
     iulx, iuly, ilrx, ilry = map(int, coordinates)

@@ -205,6 +205,8 @@ def extract_coords(coord_string, create_box_flag):
     return coordinates
 
 def change_to_folder(folder_path):
+    # it is BAD PRACTICE to do directory management like this
+    # but sometimes you gotta do what you gotta do
     if os.path.exists(folder_path):
         os.chdir(folder_path)
     else:
