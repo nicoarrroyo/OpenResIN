@@ -30,12 +30,22 @@ class SentinelImage:
         print(f"Initialised SentinelImage object for: {self.name}")
     
     def one_create_image_arrays(self):
-        # %%%% 1.1 Establishing Paths
         self.establish_paths(self)
         """Most Sentinel 2 files that come packaged in a satellite image 
         folder follow naming conventions that use information contained in the 
         title of the folder. This information can be used to easily navigate 
         through the folder's contents."""
+        
+        self.get_images(self)
+        """This operation takes a long time because the image files are so big. 
+        The difference in duration for this operation between using and not 
+        using HIGH_RES is a factor of about 20, but, again, not using HIGH_RES 
+        results in unusable images."""
+        
+        print("step 1 complete! finished at {dt.datetime.now().time()}")
+
+    def establish_paths(self):
+        # %%%% 1.1 Establishing Paths
         images_path = os.path.join(self.path, "GRANULE")
         
         # %%%%% 1.1.1 Subfolder iterative search
@@ -75,8 +85,6 @@ class SentinelImage:
         prefix = f"{tile_number_field}_{datatake_start_sensing_time}"
         bands = get_sentinel_bands(sat_number, c.HIGH_RES)
         
-        
-        
         for band in bands:
             if c.HIGH_RES:
                 file_paths.append(
@@ -86,16 +94,9 @@ class SentinelImage:
                 file_paths.append(
                 os.path.join(path_60, f"{prefix}_B{band}_60m.jp2")
                 )
-        
+
+    def get_images(self):
         # %%%% 1.2 Opening and Converting Images
-        self.get_images() # do you see the vision? there should only be two steps here. 
-        # two functions: establish_paths and get_images. these functions contain calls to everything that needs to be called
-        # i really don't think any of this is making any sense sorry
-        # i feel motivated though
-        """This operation takes a long time because the image files are so big. 
-        The difference in duration for this operation between using and not 
-        using HIGH_RES is a factor of about 20, but, again, not using HIGH_RES 
-        results in unusable images."""
         try:
             with rasterio.open(file_paths[0]) as src:
                 image_metadata = src.meta.copy()
@@ -108,8 +109,6 @@ class SentinelImage:
         
         if c.CLOUD_MASKING:
             image_arrays_clouds = image_arrays
-        
-        print("step 1 complete! finished at {dt.datetime.now().time()}")
     
     def get_band_data(self):
         print(f"Loading data from {self.path} using HighRes={c.HIGH_RES}")
@@ -148,4 +147,5 @@ class DataLabeller:
     def save_responses(self, coords):
         self.user_coords.append(coords) # something like this (not sure if this would work)
     
+
 
