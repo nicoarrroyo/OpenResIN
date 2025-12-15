@@ -13,7 +13,6 @@ import user_interfacing as ui
 
 import pipeline_operations # will merge this with others (temporary)
 
-
 # %% sentinel image object
 class SentinelImage:
     def __init__(self, folder_name):
@@ -30,6 +29,8 @@ class SentinelImage:
         print(f"Initialised SentinelImage object for: {self.name}")
     
     def one_create_image_arrays(self):
+        print("opening images and creating image arrays")
+        
         self.establish_paths(self)
         """Most Sentinel 2 files that come packaged in a satellite image 
         folder follow naming conventions that use information contained in the 
@@ -147,5 +148,6 @@ class DataLabeller:
     def save_responses(self, coords):
         self.user_coords.append(coords) # something like this (not sure if this would work)
     
+
 
 
