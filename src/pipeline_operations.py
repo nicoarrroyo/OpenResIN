@@ -49,50 +49,57 @@ Outputs:
     their coordinates.
     - Python list containing each calculated water index.
 """
-# %% Start
-# %%% Standard Libraries
-import time
+# %% Standard Libraries
 import os
 import csv
 import datetime as dt
 
-# %%% Third Party Libraries
+# %% Third Party Libraries
 import tensorflow as tf
 import numpy as np
 from PIL import Image
 from omnicloudmask import predict_from_array
 import rasterio
 
-# %%% Local Libraries
-from data_handling import rewrite, blank_entry_check, check_file_permission
-from data_handling import extract_coords, change_to_folder, create_tf_example
-from data_handling import hash_tfrecord
+# %% Local Libraries
+# =============================================================================
+# from data_handling import rewrite, blank_entry_check, check_file_permission
+# from data_handling import extract_coords, change_to_folder, create_tf_example
+# from data_handling import hash_tfrecord
+# =============================================================================
+import data_handling as data_do
+import image_handling as image_do
+import misc
+import user_interfacing as ui_do
 
-from image_handling import image_to_array, known_feature_mask, mask_urban_areas
-from image_handling import plot_indices, plot_chunks#, save_training_file
-
-from misc import get_sentinel_bands, split_array, combine_sort_unique
-
-from user_interfacing import table_print, prompt_roi, list_folders
-from user_interfacing import confirm_continue_or_exit
+# =============================================================================
+# from image_handling import image_to_array, known_feature_mask, mask_urban_areas
+# from image_handling import plot_indices, plot_chunks#, save_training_file
+# 
+# from misc import get_sentinel_bands, split_array, combine_sort_unique
+# 
+# from user_interfacing import table_print, prompt_roi, list_folders
+# from user_interfacing import confirm_continue_or_exit
+# =============================================================================
 
 import config as c
-from objects import SentinelImage
 
-
-table_print(n_chunks=c.N_CHUNKS, high_res=c.HIGH_RES, 
-            cloud_masking=c.CLOUD_MASKING, 
-            known_feature_masking=c.KNOWN_FEATURE_MASKING, 
-            show_plots=c.SHOW_INDEX_PLOTS, save_images=c.SAVE_IMAGES, 
-            labelling=c.LABEL_DATA)
+ui_do.table_print(n_chunks=c.N_CHUNKS, high_res=c.HIGH_RES, 
+                  cloud_masking=c.CLOUD_MASKING, 
+                  known_feature_masking=c.KNOWN_FEATURE_MASKING, 
+                  show_plots=c.SHOW_INDEX_PLOTS, save_images=c.SAVE_IMAGES, 
+                  labelling=c.LABEL_DATA)
 
 ndwi_arrays_list = []
 # ndvi_arrays_list = []
 # evi_arrays_list = []
 # evi2_arrays_list = []
+folders_path = os.path.join(c.HOME_DIR, "data", "sentinel_2")
+folders = ui_do.list_folders(folders_path)
 
+# %% 1. Creating image arrays
 def one_create_image_arrays(folder_path):
-    # %%%% 1.1 Establishing Paths
+    # 1.1 Establishing Paths
     """Most Sentinel 2 files that come packaged in a satellite image 
     folder follow naming conventions that use information contained in the 
     title of the folder. This information can be used to easily navigate 
@@ -101,7 +108,7 @@ def one_create_image_arrays(folder_path):
     folder_path = os.path.join(folders_path, folder)
     images_path = os.path.join(folder_path, "GRANULE")
     
-    # %%%%% 1.1.1 Subfolder iterative search
+    # 1.1.1 Subfolder iterative search
     """This folder has a strange naming convention that doesn't quite apply 
     to the other folders, so it's difficult to find a rule that would work 
     for any Sentinel 2 image. The easier way of finding this folder is by 
@@ -114,9 +121,9 @@ def one_create_image_arrays(folder_path):
         images_path = os.path.join(images_path, subdirs[0])
     else:
         print("Too many subdirectories in 'GRANULE':", len(subdirs))
-        confirm_continue_or_exit()
+        ui_do.confirm_continue_or_exit()
     
-    # %%%%% 1.1.2 Resolution selection and file name deconstruction
+    # 1.1.2 Resolution selection and file name deconstruction
     """Low resolution should only be used for troubleshooting as it does 
     not produce usable training data. High resolution uses the 10m spatial 
     resolution images but processing time is significantly longer. To save 
@@ -136,9 +143,7 @@ def one_create_image_arrays(folder_path):
      tile_number_field, _) = folder.split("_")
     
     prefix = f"{tile_number_field}_{datatake_start_sensing_time}"
-    bands = get_sentinel_bands(sat_number, c.HIGH_RES)
-    
-    
+    bands = data_do.get_sentinel_bands(2, c.HIGH_RES)
     
     for band in bands:
         if c.HIGH_RES:
@@ -150,7 +155,7 @@ def one_create_image_arrays(folder_path):
             os.path.join(path_60, f"{prefix}_B{band}_60m.jp2")
             )
     
-    # %%%% 1.2 Opening and Converting Images
+    # 1.2 Opening and Converting Images
     """This operation takes a long time because the image files are so big. 
     The difference in duration for this operation between using and not 
     using HIGH_RES is a factor of about 20, but, again, not using HIGH_RES 
@@ -161,17 +166,15 @@ def one_create_image_arrays(folder_path):
     except Exception as e:
         print("failed raster metadata pull")
         print("error: ", e)
-        confirm_continue_or_exit()
+        ui_do.confirm_continue_or_exit()
     
-    image_arrays = image_to_array(file_paths)
-    
-    if c.CLOUD_MASKING:
-        image_arrays_clouds = image_arrays
+    image_arrays = image_do.image_to_array(file_paths)
     
     print("step 1 complete! finished at {dt.datetime.now().time()}")
-    return
+    return image_arrays, image_metadata, res, prefix, images_path
 
-def two_mask_known_feature(image_arrays):
+# %% 2. Masking out known features
+def two_mask_known_feature(image_arrays, image_metadata):
     print("masking out known features")
     
     masking_path = os.path.join(c.HOME_DIR, "data", "masks")
@@ -182,14 +185,12 @@ def two_mask_known_feature(image_arrays):
         "data", 
         "WatercourseLink.shp"
         )
-    
     boundaries_data = os.path.join( # for masking the sea
         masking_path, 
         "boundaries", 
         ("Regions_December_2024_Boundaries_EN_BSC_"
         "-6948965129330885393.geojson")
         )
-    
     known_reservoirs_data = os.path.join(
         masking_path, 
         "known reservoirs", 
@@ -197,7 +198,6 @@ def two_mask_known_feature(image_arrays):
         "SHP", 
         "LRR_ENG_20230601_WGS84.shp" # WGS84 is more accurate than OSGB35
         )
-    
     urban_areas_data = os.path.join( # REMEMBER TO CITE SOURCE FROM README
         masking_path, 
         "urban areas", 
@@ -208,193 +208,82 @@ def two_mask_known_feature(image_arrays):
         )
     
     for i in range(len(image_arrays)):
-        image_arrays[i] = known_feature_mask(
+        image_arrays[i] = image_do.known_feature_mask(
             image_arrays[i], 
             image_metadata, 
             rivers_data, 
             feature_type="rivers", 
             buffer_metres=20
             )
-        image_arrays[i] = known_feature_mask(
+        image_arrays[i] = image_do.known_feature_mask(
             image_arrays[i], 
             image_metadata, 
             boundaries_data, 
             feature_type="sea"
             )
-        image_arrays[i] = known_feature_mask(
+        image_arrays[i] = image_do.known_feature_mask(
             image_arrays[i], 
             image_metadata, 
             known_reservoirs_data, 
             feature_type="known reservoirs", 
             buffer_metres=50
             )
-        image_arrays[i] = mask_urban_areas( # different process (.tif)
+        image_arrays[i] = image_do.mask_urban_areas( # different process (.tif)
             image_arrays[i], 
             image_metadata, 
             urban_areas_data
             )
     
     print("step 2 complete! finished at {dt.datetime.now().time()}")
-    return
-def three_mask_clouds():
-    return
-def four_compute_indices():
-    return
-def five_composite():
-    return
-def six_prepare_data():
-    return
-def seven_label_data():
-    return
-def eight_segment_data():
-    return
+    return image_arrays
 
+# %% 3. Masking out clouds (OmniCloudMask)
+def three_mask_clouds(image_arrays):
+    if not c.HIGH_RES:
+        print(("WARNING: high-resolution setting is disabled. "
+        "cloud masking may not be accurate"))
+        ui_do.confirm_continue_or_exit()
+    
+    print("masking clouds")
+    input_array = np.stack((
+        image_arrays[2], # red
+        image_arrays[0], # green
+        image_arrays[1]  # nir
+        ))
+    
+    try:
+        pred_mask_2d = predict_from_array(input_array, 
+                                          mosaic_device="cuda")[0]
+    except Exception as e:
+        print("WARNING: CUDA call failed, using CPU")
+        print("error:", e)
+        ui_do.confirm_continue_or_exit()
+        pred_mask_2d = predict_from_array(input_array, 
+                                          mosaic_device="cpu")[0]
+    
+    combined_mask = (
+        (pred_mask_2d == 1) | 
+        (pred_mask_2d == 2) | 
+        (pred_mask_2d == 3)
+        )
+    
+    for i in range(len(image_arrays)):
+        # float is used as it supports NaN
+        image_arrays[i] = image_arrays[i].astype(np.float32)
+        image_arrays[i][combined_mask] = np.nan
+    
+    print("step 3 complete! finished at {dt.datetime.now().time()}")
+    return image_arrays
 
-# %%% i. Find the Relevant Folders
-folders_path = os.path.join(c.HOME_DIR, "data", "sentinel_2")
-folders = list_folders(folders_path)
-
-# %%% 1. Opening Images and Creating Image Arrays
-for i, folder in enumerate(folders):
-    print("===============")
-    print(f"| IMAGE {i+1} / {len(folders)} |")
-    print("===============")
-    print("==========")
-    print("| STEP 1 |")
-    print("==========")
-    print("opening images and creating image arrays")
-    
-    
-    
-    # %%% 2. Known Feature Masking
-    print("==========")
-    print("| STEP 2 |")
-    print("==========")
-    if c.KNOWN_FEATURE_MASKING:
-        print("masking out known features")
-        
-        masking_path = os.path.join(c.HOME_DIR, "data", "masks")
-        
-        rivers_data = os.path.join(
-            masking_path, 
-            "rivers", 
-            "data", 
-            "WatercourseLink.shp"
-            )
-        
-        boundaries_data = os.path.join( # for masking the sea
-            masking_path, 
-            "boundaries", 
-            ("Regions_December_2024_Boundaries_EN_BSC_"
-            "-6948965129330885393.geojson")
-            )
-        
-        known_reservoirs_data = os.path.join(
-            masking_path, 
-            "known reservoirs", 
-            "LRR _EW_202307_v1", 
-            "SHP", 
-            "LRR_ENG_20230601_WGS84.shp" # WGS84 is more accurate than OSGB35
-            )
-        
-        urban_areas_data = os.path.join( # REMEMBER TO CITE SOURCE FROM README
-            masking_path, 
-            "urban areas", 
-            "CEH_GBLandCover_2024_10m", 
-            "data", 
-            "4dd9df19-8df5-41a0-9829-8f6114e28db1", 
-            "gblcm2024_10m.tif"
-            )
-        
-        for i in range(len(image_arrays)):
-            image_arrays[i] = known_feature_mask(
-                image_arrays[i], 
-                image_metadata, 
-                rivers_data, 
-                feature_type="rivers", 
-                buffer_metres=20
-                )
-            image_arrays[i] = known_feature_mask(
-                image_arrays[i], 
-                image_metadata, 
-                boundaries_data, 
-                feature_type="sea"
-                )
-            image_arrays[i] = known_feature_mask(
-                image_arrays[i], 
-                image_metadata, 
-                known_reservoirs_data, 
-                feature_type="known reservoirs", 
-                buffer_metres=50
-                )
-            image_arrays[i] = mask_urban_areas( # different process (.tif)
-                image_arrays[i], 
-                image_metadata, 
-                urban_areas_data
-                )
-        
-        print("step 2 complete! finished at {dt.datetime.now().time()}")
-    else:
-        print("skipping known feature masking")
-
-    # %%% 3. Masking Clouds
-    print("==========")
-    print("| STEP 3 |")
-    print("==========")
-    if c.CLOUD_MASKING:
-        if not c.HIGH_RES:
-            print(("WARNING: high-resolution setting is disabled. "
-            "cloud masking may not be accurate"))
-            confirm_continue_or_exit()
-        
-        print("masking clouds")
-
-        input_array = np.stack((
-            image_arrays_clouds[2], # red
-            image_arrays_clouds[0], # green
-            image_arrays_clouds[1] # nir
-            ))
-        
-        try:
-            pred_mask_2d = predict_from_array(input_array, 
-                                              mosaic_device="cuda")[0]
-        except Exception as e:
-            print("WARNING: CUDA call failed, using CPU")
-            print("error:", e)
-            confirm_continue_or_exit()
-            pred_mask_2d = predict_from_array(input_array, 
-                                              mosaic_device="cpu")[0]
-        
-        combined_mask = (
-            (pred_mask_2d == 1) | 
-            (pred_mask_2d == 2) | 
-            (pred_mask_2d == 3)
-            )
-        
-        for i in range(len(image_arrays)):
-            # float is used as it supports NaN
-            image_arrays[i] = image_arrays[i].astype(np.float32)
-            image_arrays[i][combined_mask] = np.nan
-        
-        print("step 3 complete! finished at {dt.datetime.now().time()}")
-    else:
-        print("skipping cloud masking")
-    
-    # %%% 4. Index Calculation
-    print("==========")
-    print("| STEP 4 |")
-    print("==========")
-    print("index calculation start")
-    
-    # %%%% 4.1 Image Array Type Conversion
+# %% 4. Compute water indices
+def four_compute_indices(image_arrays):
     print("converting image array types")
-    # first convert to int
-    # np.uint16 type is bad for algebraic operations!
+    # first convert to int (np.uint16 type is bad for algebraic operations)!
     for i, image_array in enumerate(image_arrays):
         image_arrays[i] = image_array.astype(np.float32)
     green, nir, red = image_arrays
     
-    # %%%% 4.2 Calculating Indices
+    # 4.2 Calculating Indices
     print("populating index arrays")
     np.seterr(divide="ignore", invalid="ignore")
     ndwi = (green - nir) / (green + nir)
@@ -413,6 +302,223 @@ for i, folder in enumerate(folders):
     # evi2_arrays_list.append(evi2)
     
     print("step 4 complete! finished at {dt.datetime.now().time()}")
+    return ndwi_arrays_list
+
+# %% Image compositing
+def five_composite(ndwi_arrays_list, res, folder_path):
+    ndwi_stack = np.stack(ndwi_arrays_list)
+    ndwi_mean = np.nanmean(ndwi_stack, axis=0)
+    #ndwi_sd = np.nanstd(ndwi_stack, axis=0)
+
+    # 5.2 Compositing Scenes Together
+    # ndwi_composite = np.stack([ndwi_mean, ndwi_sd], axis=-1)
+
+    # 5.3 Displaying Index
+    if c.SHOW_INDEX_PLOTS:
+        if c.SAVE_IMAGES:
+            print("saving and displaying water index images")
+        else:
+            print("displaying water index images")
+        image_do.plot_indices(ndwi_mean, c.PLOT_SIZE, c.DPI, c.SAVE_IMAGES, 
+                              folder_path, res)
+        print(f"step 5 complete! finished at {dt.datetime.now().time()}")
+    else:
+        print("not displaying water index images")
+    return ndwi_mean#, ndwi_sd, ndwi_composite
+
+def fiveb_plot(ndwi_mean):
+    
+    return
+
+# %% Data preparation
+def six_prepare_data(res, prefix, images_path):
+    # %%%% 6.1 Preparing True Colour Image
+    """Load the TCI file at selected resolution, convert to array, resize for 
+    GUI labelling."""
+    if c.LABEL_DATA:
+        print(f"opening {res} resolution true colour image")
+        
+        tci_path = os.path.join(images_path, "IMG_DATA", f"R{res}")
+        tci_file_name = prefix + f"_TCI_{res}.jp2"
+        tci_array = image_do.image_to_array(os.path.join(tci_path, tci_file_name))
+        
+        tci_60_path = os.path.join(folder_path, "GRANULE", subdirs[0], 
+                                   "IMG_DATA", "R60m")
+        tci_60_file_name = prefix + "_TCI_60m.jp2"
+        with Image.open(os.path.join(tci_60_path, tci_60_file_name)) as img:
+            size = (img.width//10, img.height//10)
+            tci_60_array = np.array(img.resize(size))
+
+    # %%%% 6.2 Creating Chunks from Satellite Imagery
+    """Split the NDWI array into N_CHUNKS equal segments for batch ROI 
+    labelling and parallel processing."""
+    print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
+    index_chunks = split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
+    global_max = 0
+    if c.LABEL_DATA:
+        tci_chunks = split_array(array=tci_array, n_chunks=c.N_CHUNKS)
+
+    # %%%% 6.3 Preparing File for Labelling
+    """Initialise or validate the CSV file by enforcing a header, removing 
+    blank lines, and ensuring sequential chunk indices"""
+    break_flag = False
+
+    # check for a responses folder
+    data_folder_found = False
+    for folder in folders:
+        if data_folder_found:
+            break
+        
+        folder_path = os.path.join(c.HOME_DIR, "data", "sentinel_2", folder)
+        if os.path.exists(os.path.join(folder_path, "training data")):
+            data_folder_found = True
+            labelling_path = os.path.join(folder_path, "training data")
+
+    if not data_folder_found:
+        labelling_path = os.path.join(folder_path, "training data")
+        change_to_folder(labelling_path) # create the folder
+        os.chdir(c.HOME_DIR) # always go back to initial home folder
+        # THIS IS BAD!! PLEASE FIND A WAY TO CHANGE THIS!!
+
+    lines = []
+    header = ("chunk,reservoirs,water-bodies,reservoir-"
+    "coordinates,,,,,water-body-coordinates\n")
+    data_file = os.path.join(labelling_path, c.DATA_FILE_NAME)
+    blank_entry_check(file=data_file) # remove all blank entries
+
+    # %%%%% 6.3.1 File validity check
+    """This section is about checking that the contents of the file are sound. 
+    This means checking that, for example, the file exists, or that the entry 
+    for chunk 241 is after the entry for chunk 240, or any other problem that 
+    may arise. As with every data handling operation, file permission is 
+    checked directly before this step, as well as any blank entries. Although 
+    this may seem an excessive step to perform every time, it is necessary to 
+    ensure that the file data is exactly as it should be. 
+    All these checks are carried out in 'read-only' mode unless the user 
+    specifies otherwise. This is to make sure that the data is not accidentally 
+    overwritten at any point, again, unless the user is sure this is the 
+    intended behaviour."""
+    print("preparing file for labelling")
+    while True:
+        # file will always exist due to blank_entry_check call
+        with open(data_file, "r") as file:
+            lines = file.readlines()
+        try:
+            # Validate file data
+            for i in range(1, len(lines) - 1):
+                current_chunk = int(lines[i].split(",")[0])
+                next_chunk = int(lines[i+1].split(",")[0])
+                if next_chunk - current_chunk != 1:
+                    print(f"error in line {i + 2}, "
+                          f"expected chunk {current_chunk + 1}")
+                    raise ValueError("File validity error")
+            last_chunk = int(lines[-1].split(",")[0])
+            break
+        except (ValueError, IndexError) as e:
+            print(f"error - file with invalid data: {e}")
+            print("type 'quit' to exit, or 'new' for a fresh file")
+            ans = input("press enter to retry: ").strip().lower()
+            if ans.lower() == 'quit':
+                print("quitting")
+                #return ndwi_mean
+            if ans.lower() == 'new':
+                print("creating new file")
+                with open(data_file, "w") as file:
+                    file.write(header)
+                    file.write("0, 1, 0\n") # dummy file to start up
+                continue
+
+    i = last_chunk + 1 # from this point on, "i" is off-limits as a counter
+
+    # %%%%% 6.3.2 Data completion check
+    """Once file validity has been verified, this step is for ensuring that 
+    the data in the file is complete. While the previous step (6.3.1) was 
+    mostly intended for checking that the chunks are in the correct order, 
+    this step additionally checks that the chunks that are supposed to have 
+    data, i.e. a chunk is noted as containing a reservoir, that there are 
+    coordinates outlining that reservoir. If this is not the case, the 
+    'data_correction' mode is activated, in which the user is prompted to 
+    essentially fill in the coordinates that should exist in the place where 
+    a chunk is supposed to contain some water body."""
+    # find chunks with invalid or incomplete reservoir coordinate data
+    reservoir_rows = []
+    body_rows = []
+    invalid_rows = []
+    data_correction = False
+
+    with open(data_file, "r") as file:
+        lines = file.readlines() # reread lines in case of changes
+        globals()["lines"] = lines
+    for j in range(1, len(lines)): # starting from the "headers" line
+        # check for reservoirs without coordinates
+        num_of_reservoirs = int(lines[j].split(",")[1])
+        try: # try to access coordinates
+            res_coord = lines[j].split(",")[3]
+            res_has_coords = bool(res_coord[0] == "[")
+        except: # if unable to access, they do not exist
+            res_has_coords = False
+        if num_of_reservoirs != 0 and not res_has_coords:
+            reservoir_rows.append(j-1)
+            data_correction = True
+        elif num_of_reservoirs == 0 and res_has_coords:
+            invalid_rows.append(j-1)
+            data_correction = True
+        
+        # check for non-reservoir water bodies without coordinates
+        num_of_bodies = int(lines[j].split(",")[2])
+        try: # try to access coordinates
+            body_coord = lines[j].split(",")[8]
+            body_has_coords = bool(body_coord[0] == "[")
+        except: # if unable to access, they do not exist
+            body_has_coords = False
+        if num_of_bodies != 0 and not body_has_coords:
+            body_rows.append(j-1)
+            data_correction = True
+        elif num_of_bodies == 0 and body_has_coords:
+            invalid_rows.append(j-1)
+            data_correction = True
+    invalid_rows = combine_sort_unique(reservoir_rows, body_rows, invalid_rows)
+
+    if data_correction:
+        print(f"found {len(invalid_rows)} chunks containing "
+               "incomplete, missing, or incorrect coordinate data")
+        i = invalid_rows[0]
+        invalid_rows_index = 0
+    print(f"step 6 complete! finished at {dt.datetime.now().time()}")
+    return
+
+# %% Data labelling
+def seven_label_data():
+    return
+
+# %% Data segmentation
+def eight_segment_data():
+    return
+
+
+for i, folder in enumerate(folders):
+    print("===============")
+    print(f"| IMAGE {i+1} / {len(folders)} |")
+    print("===============")
+    print("==========")
+    print("| STEP 1 |")
+    print("==========")
+    print("opening images and creating image arrays")
+    
+    print("==========")
+    print("| STEP 2 |")
+    print("==========")
+    if c.KNOWN_FEATURE_MASKING:
+        print("masking out known features")
+    
+    print("==========")
+    print("| STEP 3 |")
+    print("==========")
+    
+    print("==========")
+    print("| STEP 4 |")
+    print("==========")
+    print("index calculation start")
 
 # %%% 5. Spectral Temporal Metrics
 print("==========")
@@ -420,187 +526,11 @@ print("| STEP 5 |")
 print("==========")
 print("temporal image compositing start")
 
-# %%%% 5.1 Preparation for Compositing
-ndwi_stack = np.stack(ndwi_arrays_list)
-ndwi_mean = np.nanmean(ndwi_stack, axis=0)
-globals()["ndwi_mean"] = ndwi_mean
-#ndwi_sd = np.nanstd(ndwi_stack, axis=0)
-
-# %%%% 5.2 Compositing Scenes Together
-#ndwi_composite = np.stack([ndwi_mean, ndwi_sd], axis=-1)
-#globals()["ndwi_comp"] = ndwi_composite
-
-# %%%% 5.3 Displaying Index
-if c.SHOW_INDEX_PLOTS:
-    if c.SAVE_IMAGES:
-        print("saving and displaying water index images")
-    else:
-        print("displaying water index images")
-    plot_indices(ndwi_mean, c.PLOT_SIZE, c.DPI, c.SAVE_IMAGES, 
-    folder_path, res)
-    print(f"step 5 complete! finished at {dt.datetime.now().time()}")
-else:
-    print("not displaying water index images")
-
 # %%% 6. Data Preparation
 print("==========")
 print("| STEP 6 |")
 print("==========")
 print("data preparation start")
-
-# %%%% 6.1 Preparing True Colour Image
-"""Load the TCI file at selected resolution, convert to array, resize for 
-GUI labelling."""
-if c.LABEL_DATA:
-    print(f"opening {res} resolution true colour image")
-    
-    tci_path = os.path.join(images_path, "IMG_DATA", f"R{res}")
-    tci_file_name = prefix + f"_TCI_{res}.jp2"
-    tci_array = image_to_array(os.path.join(tci_path, tci_file_name))
-    
-    tci_60_path = os.path.join(folder_path, "GRANULE", subdirs[0], 
-                               "IMG_DATA", "R60m")
-    tci_60_file_name = prefix + "_TCI_60m.jp2"
-    with Image.open(os.path.join(tci_60_path, tci_60_file_name)) as img:
-        size = (img.width//10, img.height//10)
-        tci_60_array = np.array(img.resize(size))
-
-# %%%% 6.2 Creating Chunks from Satellite Imagery
-"""Split the NDWI array into N_CHUNKS equal segments for batch ROI 
-labelling and parallel processing."""
-print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
-index_chunks = split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
-global_max = 0
-if c.LABEL_DATA:
-    tci_chunks = split_array(array=tci_array, n_chunks=c.N_CHUNKS)
-
-# %%%% 6.3 Preparing File for Labelling
-"""Initialise or validate the CSV file by enforcing a header, removing 
-blank lines, and ensuring sequential chunk indices"""
-break_flag = False
-
-# check for a responses folder
-data_folder_found = False
-for folder in folders:
-    if data_folder_found:
-        break
-    
-    folder_path = os.path.join(c.HOME_DIR, "data", "sentinel_2", folder)
-    if os.path.exists(os.path.join(folder_path, "training data")):
-        data_folder_found = True
-        labelling_path = os.path.join(folder_path, "training data")
-
-if not data_folder_found:
-    labelling_path = os.path.join(folder_path, "training data")
-    change_to_folder(labelling_path) # create the folder
-    os.chdir(c.HOME_DIR) # always go back to initial home folder
-    # THIS IS BAD!! PLEASE FIND A WAY TO CHANGE THIS!!
-
-lines = []
-header = ("chunk,reservoirs,water-bodies,reservoir-"
-"coordinates,,,,,water-body-coordinates\n")
-data_file = os.path.join(labelling_path, c.DATA_FILE_NAME)
-blank_entry_check(file=data_file) # remove all blank entries
-
-# %%%%% 6.3.1 File validity check
-"""This section is about checking that the contents of the file are sound. 
-This means checking that, for example, the file exists, or that the entry 
-for chunk 241 is after the entry for chunk 240, or any other problem that 
-may arise. As with every data handling operation, file permission is 
-checked directly before this step, as well as any blank entries. Although 
-this may seem an excessive step to perform every time, it is necessary to 
-ensure that the file data is exactly as it should be. 
-All these checks are carried out in 'read-only' mode unless the user 
-specifies otherwise. This is to make sure that the data is not accidentally 
-overwritten at any point, again, unless the user is sure this is the 
-intended behaviour."""
-print("preparing file for labelling")
-while True:
-    # file will always exist due to blank_entry_check call
-    with open(data_file, "r") as file:
-        lines = file.readlines()
-    try:
-        # Validate file data
-        for i in range(1, len(lines) - 1):
-            current_chunk = int(lines[i].split(",")[0])
-            next_chunk = int(lines[i+1].split(",")[0])
-            if next_chunk - current_chunk != 1:
-                print(f"error in line {i + 2}, "
-                      f"expected chunk {current_chunk + 1}")
-                raise ValueError("File validity error")
-        last_chunk = int(lines[-1].split(",")[0])
-        break
-    except (ValueError, IndexError) as e:
-        print(f"error - file with invalid data: {e}")
-        print("type 'quit' to exit, or 'new' for a fresh file")
-        ans = input("press enter to retry: ").strip().lower()
-        if ans.lower() == 'quit':
-            print("quitting")
-            #return ndwi_mean
-        if ans.lower() == 'new':
-            print("creating new file")
-            with open(data_file, "w") as file:
-                file.write(header)
-                file.write("0, 1, 0\n") # dummy file to start up
-            continue
-
-i = last_chunk + 1 # from this point on, "i" is off-limits as a counter
-
-# %%%%% 6.3.2 Data completion check
-"""Once file validity has been verified, this step is for ensuring that 
-the data in the file is complete. While the previous step (6.3.1) was 
-mostly intended for checking that the chunks are in the correct order, 
-this step additionally checks that the chunks that are supposed to have 
-data, i.e. a chunk is noted as containing a reservoir, that there are 
-coordinates outlining that reservoir. If this is not the case, the 
-'data_correction' mode is activated, in which the user is prompted to 
-essentially fill in the coordinates that should exist in the place where 
-a chunk is supposed to contain some water body."""
-# find chunks with invalid or incomplete reservoir coordinate data
-reservoir_rows = []
-body_rows = []
-invalid_rows = []
-data_correction = False
-
-with open(data_file, "r") as file:
-    lines = file.readlines() # reread lines in case of changes
-    globals()["lines"] = lines
-for j in range(1, len(lines)): # starting from the "headers" line
-    # check for reservoirs without coordinates
-    num_of_reservoirs = int(lines[j].split(",")[1])
-    try: # try to access coordinates
-        res_coord = lines[j].split(",")[3]
-        res_has_coords = bool(res_coord[0] == "[")
-    except: # if unable to access, they do not exist
-        res_has_coords = False
-    if num_of_reservoirs != 0 and not res_has_coords:
-        reservoir_rows.append(j-1)
-        data_correction = True
-    elif num_of_reservoirs == 0 and res_has_coords:
-        invalid_rows.append(j-1)
-        data_correction = True
-    
-    # check for non-reservoir water bodies without coordinates
-    num_of_bodies = int(lines[j].split(",")[2])
-    try: # try to access coordinates
-        body_coord = lines[j].split(",")[8]
-        body_has_coords = bool(body_coord[0] == "[")
-    except: # if unable to access, they do not exist
-        body_has_coords = False
-    if num_of_bodies != 0 and not body_has_coords:
-        body_rows.append(j-1)
-        data_correction = True
-    elif num_of_bodies == 0 and body_has_coords:
-        invalid_rows.append(j-1)
-        data_correction = True
-invalid_rows = combine_sort_unique(reservoir_rows, body_rows, invalid_rows)
-
-if data_correction:
-    print(f"found {len(invalid_rows)} chunks containing "
-           "incomplete, missing, or incorrect coordinate data")
-    i = invalid_rows[0]
-    invalid_rows_index = 0
-print(f"step 6 complete! finished at {dt.datetime.now().time()}")
 
 # %%% 7. Data Labelling
 print("==========")
