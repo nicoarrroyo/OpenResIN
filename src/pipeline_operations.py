@@ -132,12 +132,6 @@ def one_create_image_arrays(folder_path):
     assigned are: sentinel number, instrument and product level, 
     processing baseline number, relative orbit number, and product 
     discriminator and format."""
-    if c.HIGH_RES:
-        res = "10m"
-        path_10 = os.path.join(images_path, "IMG_DATA", "R10m")
-    else:
-        res = "60m"
-        path_60 = os.path.join(images_path, "IMG_DATA", "R60m")
     
     (_, _, datatake_start_sensing_time, _, _, 
      tile_number_field, _) = folder.split("_")
@@ -146,13 +140,13 @@ def one_create_image_arrays(folder_path):
     bands = data_do.get_sentinel_bands(2, c.HIGH_RES)
     
     for band in bands:
-        if c.HIGH_RES:
-            file_paths.append(
-            os.path.join(path_10, f"{prefix}_B{band}_10m.jp2")
-            )
-        else:
-            file_paths.append(
-            os.path.join(path_60, f"{prefix}_B{band}_60m.jp2")
+        file_paths.append(
+            os.path.join(
+                images_path, 
+                "IMG_DATA", 
+                f"R{c.RES}", 
+                f"{prefix}_B{band}_{c.RES}.jp2"
+                )
             )
     
     # 1.2 Opening and Converting Images
