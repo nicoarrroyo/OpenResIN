@@ -4,6 +4,7 @@ import os
 DPI                     = 3000      # 3000 for full resolution, below 1000, images become fuzzy
 N_CHUNKS                = 5000      # number of chunks into which images are split
 HIGH_RES                = True      # use finer 10m spatial resolution (slower)
+RES = "10m" if HIGH_RES else "60m"
 KNOWN_FEATURE_MASKING   = True
 CLOUD_MASKING           = True
 SHOW_INDEX_PLOTS        = True
