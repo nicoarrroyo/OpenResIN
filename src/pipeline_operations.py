@@ -1,56 +1,6 @@
-""" Navigable Automated Labelling Interface for Regions of Attention (NALIRA)
-
-Description:
-NALIRA processes Sentinel 2 imagery to generate labelled data for the 
-Keras Reservoir Identification Sequential Platform (KRISP) as part of the 
-overarching Individual Project Data to Model Pipeline (IPDMP). It extracts 
-water body information from satellite imagery and provides a UI for data 
-labelling. The purpose of NALIRA is to create training and test data for KRISP.
-
-Workflow:
-1. Data Ingestion:
-    - Reads Sentinel 2 image folders and locates necessary image bands.
-
-2. Known Feature Masking:
-    - Sea: Can use region shapefile boundaries
-    - Rivers and streams: Uses dedicated river shapefile with 100m buffer
-    - Large reservoirs: Uses Northing and Easting information in CSV file
-    - Urban areas: Uses .tif rasterized for masking
-    - Areas with large slopes: 
-
-3. Cloud Masking: 
-    - OmniCloudMask, using red and green Sentinel 2 bands
-
-4. Index Calculation:
-    - Compute necessary spectral indices
-        - Normalized Difference Water Index (NDWI)
-        - Normalized Difference Vegetation Index (NDVI)
-        - Enhanced Vegetation Index (EVI)
-
-5. Compositing:
-    - A set of Spectral-Temporal Metrics (STMs) computed for all pixels. 
-        - These metrics are based on the temporal median, and 25th and 75th 
-        percentiles of NDWI, NDVI, and/or EVI. 
-        - The NDVI and/or EVI can be used to differentiate vegetation water 
-        content from surface water bodies. 
-    - Optional data visualization at this stage. 
-
-7. Training Data Polygons:
-    - Preliminary data preparation steps, including ensuring file content 
-    validity and presence, as well as locating and opening the necessary True 
-    Colour Image (TCI) for data labelling. 
-    - Provides a Tkinter GUI for manual region of interest (ROI)  labelling via 
-    rectangle selection.
-    - Uses chunk-based processing; saves the quantity of water reservoirs and 
-    water bodies, labelled ROI coordinates, and chunk numbers to a CSV file. 
-
-Outputs:
-    - Labelled data in CSV format, with chunk IDs, counts of water bodies, and 
-    their coordinates.
-    - Python list containing each calculated water index.
-"""
 # %% Standard Libraries
 import os
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import csv
 import datetime as dt
 
@@ -97,8 +47,8 @@ ndwi_arrays_list = []
 folders_path = os.path.join(c.HOME_DIR, "data", "sentinel_2")
 folders = ui_do.list_folders(folders_path)
 
-# %% 1. Creating image arrays
-def one_create_image_arrays(folder_path):
+# %% 1. Creating image arrays (iterative)
+def one_create_image_arrays(folders_path, folder):
     # 1.1 Establishing Paths
     """Most Sentinel 2 files that come packaged in a satellite image 
     folder follow naming conventions that use information contained in the 
@@ -149,7 +99,7 @@ def one_create_image_arrays(folder_path):
                 )
             )
     
-    # 1.2 Opening and Converting Images
+    # 1.2.1 Opening and Converting Band Images
     """This operation takes a long time because the image files are so big. 
     The difference in duration for this operation between using and not 
     using HIGH_RES is a factor of about 20, but, again, not using HIGH_RES 
@@ -164,10 +114,29 @@ def one_create_image_arrays(folder_path):
     
     image_arrays = image_do.image_to_array(file_paths)
     
+    # 1.2.2 Opening and Converting True Colour Images
+    tci_array = []
+    tci_60_array = []
+    if c.LABEL_DATA:
+        """Load the TCI file at selected resolution, convert to array, resize for 
+        GUI labelling."""
+        print(f"opening {c.RES} resolution true colour image")
+        
+        tci_path = os.path.join(images_path, "IMG_DATA", f"R{c.RES}")
+        tci_file_name = prefix + f"_TCI_{c.RES}.jp2"
+        tci_array = image_do.image_to_array(os.path.join(tci_path, tci_file_name))
+        
+        tci_60_path = os.path.join(folder_path, "GRANULE", subdirs[0], 
+                                   "IMG_DATA", "R60m")
+        tci_60_file_name = prefix + "_TCI_60m.jp2"
+        with Image.open(os.path.join(tci_60_path, tci_60_file_name)) as img:
+            size = (img.width//10, img.height//10)
+            tci_60_array = np.array(img.resize(size))
+    
     print("step 1 complete! finished at {dt.datetime.now().time()}")
-    return image_arrays, image_metadata, c.RES, prefix, images_path
+    return image_arrays, image_metadata, prefix, images_path, tci_array, tci_60_array
 
-# %% 2. Masking out known features
+# %% 2. Masking out known features (iterative)
 def two_mask_known_feature(image_arrays, image_metadata):
     print("masking out known features")
     
@@ -231,7 +200,7 @@ def two_mask_known_feature(image_arrays, image_metadata):
     print("step 2 complete! finished at {dt.datetime.now().time()}")
     return image_arrays
 
-# %% 3. Masking out clouds (OmniCloudMask)
+# %% 3. Masking out clouds (OmniCloudMask) (iterative)
 def three_mask_clouds(image_arrays):
     if not c.HIGH_RES:
         print(("WARNING: high-resolution setting is disabled. "
@@ -269,10 +238,10 @@ def three_mask_clouds(image_arrays):
     print("step 3 complete! finished at {dt.datetime.now().time()}")
     return image_arrays
 
-# %% 4. Compute water indices
+# %% 4. Compute water indices (iterative)
 def four_compute_indices(image_arrays):
     print("converting image array types")
-    # first convert to int (np.uint16 type is bad for algebraic operations)!
+    # first convert to float32 (np.uint16 type is bad for algebraic operations)!
     for i, image_array in enumerate(image_arrays):
         image_arrays[i] = image_array.astype(np.float32)
     green, nir, red = image_arrays
@@ -298,16 +267,20 @@ def four_compute_indices(image_arrays):
     print("step 4 complete! finished at {dt.datetime.now().time()}")
     return ndwi_arrays_list
 
-# %% Image compositing
+# %% 5. Image compositing (and plotting)
 def five_composite(ndwi_arrays_list, folder_path):
+    print("compositing all images together")
     ndwi_stack = np.stack(ndwi_arrays_list)
     ndwi_mean = np.nanmean(ndwi_stack, axis=0)
     #ndwi_sd = np.nanstd(ndwi_stack, axis=0)
 
     # 5.2 Compositing Scenes Together
     # ndwi_composite = np.stack([ndwi_mean, ndwi_sd], axis=-1)
+    
+    print(f"step 5 complete! finished at {dt.datetime.now().time()}")
+    return ndwi_mean#, ndwi_sd, ndwi_composite
 
-    # 5.3 Displaying Index
+def fiveb_plot(ndwi_mean, folder_path):
     if c.SHOW_INDEX_PLOTS:
         if c.SAVE_IMAGES:
             print("saving and displaying water index images")
@@ -315,44 +288,23 @@ def five_composite(ndwi_arrays_list, folder_path):
             print("displaying water index images")
         image_do.plot_indices(ndwi_mean, c.PLOT_SIZE, c.DPI, c.SAVE_IMAGES, 
                               folder_path, c.RES)
-        print(f"step 5 complete! finished at {dt.datetime.now().time()}")
+        print(f"step 5b (plotting) complete! finished at {dt.datetime.now().time()}")
     else:
         print("not displaying water index images")
-    return ndwi_mean#, ndwi_sd, ndwi_composite
-
-def fiveb_plot(ndwi_mean):
-    
     return
 
-# %% Data preparation
-def six_prepare_data(c.RES, prefix, images_path):
-    # %%%% 6.1 Preparing True Colour Image
-    """Load the TCI file at selected resolution, convert to array, resize for 
-    GUI labelling."""
-    if c.LABEL_DATA:
-        print(f"opening {c.RES} resolution true colour image")
-        
-        tci_path = os.path.join(images_path, "IMG_DATA", f"R{c.RES}")
-        tci_file_name = prefix + f"_TCI_{c.RES}.jp2"
-        tci_array = image_do.image_to_array(os.path.join(tci_path, tci_file_name))
-        
-        tci_60_path = os.path.join(folder_path, "GRANULE", subdirs[0], 
-                                   "IMG_DATA", "R60m")
-        tci_60_file_name = prefix + "_TCI_60m.jp2"
-        with Image.open(os.path.join(tci_60_path, tci_60_file_name)) as img:
-            size = (img.width//10, img.height//10)
-            tci_60_array = np.array(img.resize(size))
-
-    # %%%% 6.2 Creating Chunks from Satellite Imagery
+# %% 6. Data preparation
+def six_prepare_data(prefix, images_path, subdirs, folder_path, ndwi_mean):
+    # 6.1 Creating Chunks from Satellite Imagery
     """Split the NDWI array into N_CHUNKS equal segments for batch ROI 
     labelling and parallel processing."""
     print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
-    index_chunks = split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
+    index_chunks = misc.split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
     global_max = 0
     if c.LABEL_DATA:
-        tci_chunks = split_array(array=tci_array, n_chunks=c.N_CHUNKS)
+        tci_chunks = misc.split_array(array=tci_array, n_chunks=c.N_CHUNKS)
 
-    # %%%% 6.3 Preparing File for Labelling
+    # 6.2 Preparing File for Labelling
     """Initialise or validate the CSV file by enforcing a header, removing 
     blank lines, and ensuring sequential chunk indices"""
     break_flag = False
@@ -380,7 +332,7 @@ def six_prepare_data(c.RES, prefix, images_path):
     data_file = os.path.join(labelling_path, c.DATA_FILE_NAME)
     blank_entry_check(file=data_file) # remove all blank entries
 
-    # %%%%% 6.3.1 File validity check
+    # 6.2.1 File validity check
     """This section is about checking that the contents of the file are sound. 
     This means checking that, for example, the file exists, or that the entry 
     for chunk 241 is after the entry for chunk 240, or any other problem that 
@@ -424,7 +376,7 @@ def six_prepare_data(c.RES, prefix, images_path):
 
     i = last_chunk + 1 # from this point on, "i" is off-limits as a counter
 
-    # %%%%% 6.3.2 Data completion check
+    # 6.2.2 Data completion check
     """Once file validity has been verified, this step is for ensuring that 
     the data in the file is complete. While the previous step (6.3.1) was 
     mostly intended for checking that the chunks are in the correct order, 
@@ -481,11 +433,11 @@ def six_prepare_data(c.RES, prefix, images_path):
     print(f"step 6 complete! finished at {dt.datetime.now().time()}")
     return
 
-# %% Data labelling
+# %% 7. Data labelling
 def seven_label_data():
     return
 
-# %% Data segmentation
+# %% 8. Data segmentation
 def eight_segment_data():
     return
 
