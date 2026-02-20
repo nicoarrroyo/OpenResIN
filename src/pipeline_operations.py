@@ -84,7 +84,7 @@ import user_interfacing as ui_do
 
 import config as c
 
-ui_do.table_print(n_chunks=c.N_CHUNKS, high_res=c.HIGH_RES, 
+ui_do.table_print(n_chunks=c.N_CHUNKS, high_res=c.HIGH_RES, resolution=c.RES, 
                   cloud_masking=c.CLOUD_MASKING, 
                   known_feature_masking=c.KNOWN_FEATURE_MASKING, 
                   show_plots=c.SHOW_INDEX_PLOTS, save_images=c.SAVE_IMAGES, 
@@ -165,7 +165,7 @@ def one_create_image_arrays(folder_path):
     image_arrays = image_do.image_to_array(file_paths)
     
     print("step 1 complete! finished at {dt.datetime.now().time()}")
-    return image_arrays, image_metadata, res, prefix, images_path
+    return image_arrays, image_metadata, c.RES, prefix, images_path
 
 # %% 2. Masking out known features
 def two_mask_known_feature(image_arrays, image_metadata):
@@ -299,7 +299,7 @@ def four_compute_indices(image_arrays):
     return ndwi_arrays_list
 
 # %% Image compositing
-def five_composite(ndwi_arrays_list, res, folder_path):
+def five_composite(ndwi_arrays_list, folder_path):
     ndwi_stack = np.stack(ndwi_arrays_list)
     ndwi_mean = np.nanmean(ndwi_stack, axis=0)
     #ndwi_sd = np.nanstd(ndwi_stack, axis=0)
@@ -314,7 +314,7 @@ def five_composite(ndwi_arrays_list, res, folder_path):
         else:
             print("displaying water index images")
         image_do.plot_indices(ndwi_mean, c.PLOT_SIZE, c.DPI, c.SAVE_IMAGES, 
-                              folder_path, res)
+                              folder_path, c.RES)
         print(f"step 5 complete! finished at {dt.datetime.now().time()}")
     else:
         print("not displaying water index images")
@@ -325,15 +325,15 @@ def fiveb_plot(ndwi_mean):
     return
 
 # %% Data preparation
-def six_prepare_data(res, prefix, images_path):
+def six_prepare_data(c.RES, prefix, images_path):
     # %%%% 6.1 Preparing True Colour Image
     """Load the TCI file at selected resolution, convert to array, resize for 
     GUI labelling."""
     if c.LABEL_DATA:
-        print(f"opening {res} resolution true colour image")
+        print(f"opening {c.RES} resolution true colour image")
         
-        tci_path = os.path.join(images_path, "IMG_DATA", f"R{res}")
-        tci_file_name = prefix + f"_TCI_{res}.jp2"
+        tci_path = os.path.join(images_path, "IMG_DATA", f"R{c.RES}")
+        tci_file_name = prefix + f"_TCI_{c.RES}.jp2"
         tci_array = image_do.image_to_array(os.path.join(tci_path, tci_file_name))
         
         tci_60_path = os.path.join(folder_path, "GRANULE", subdirs[0], 
