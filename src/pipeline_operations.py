@@ -277,7 +277,7 @@ def fiveb_plot(ndwi_mean, folder_path):
     return
 
 # %% 6. Data preparation
-def six_prepare_data():
+def six_prepare_data(ndwi_mean, tci_array, folders):
     # 6.1 Creating Chunks from Satellite Imagery
     """Split the NDWI array into N_CHUNKS equal segments for batch ROI 
     labelling and parallel processing."""
@@ -413,7 +413,7 @@ def six_prepare_data():
         i = invalid_rows[0]
         invalid_rows_index = 0
     print(f"step 6 complete! finished at {dt.datetime.now().time()}")
-    return
+    return index_chunks, tci_chunks, break_flag, invalid_rows_index
 
 # %% 7. Data labelling
 def seven_label_data():
