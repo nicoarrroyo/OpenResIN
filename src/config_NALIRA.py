@@ -3,7 +3,7 @@ import os
 # -- Processing Settings --
 DPI                     = 3000      # 3000 for full resolution, below 1000, images become fuzzy
 N_CHUNKS                = 5000      # number of chunks into which images are split
-HIGH_RES                = True      # use finer 10m spatial resolution (slower)
+HIGH_RES                = False     # use finer 10m spatial resolution (slower)
 RES = "10m" if HIGH_RES else "60m"
 KNOWN_FEATURE_MASKING   = True
 CLOUD_MASKING           = True
@@ -19,8 +19,8 @@ PLOT_SIZE_CHUNKS        = (7, 7)
 
 # -- Paths --
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.dirname(SRC_DIR)
-DATA_DIR = os.path.join(DATA_DIR, "data") 
+HOME_DIR = os.path.dirname(SRC_DIR)
+DATA_DIR = os.path.join(HOME_DIR, "data")
 
 # -- Constants --
 BAND_MAP_H = { # high-res version of band names

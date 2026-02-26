@@ -3,7 +3,9 @@ import random
 import math
 
 def get_sentinel_bands(sentinel_n, high_res):
-    """ OUT OF DATE
+    """ 
+    THIS FUNCTION IS BEING DEPRACATED IN FAVOUR OF `get_sen2_bands` in data_handling
+    OUT OF DATE
     Sentinel 2 has thirteen spectral bands, five of which are of interest for 
     the calculation of water detection indices. The blue, green, and near-
     infrared (NIR) bands can achieve 10 metre spatial resolution, while both 
@@ -36,7 +38,6 @@ def get_sentinel_bands(sentinel_n, high_res):
         The number (as a string) of the SWIR1 band in Sentinel 2 data.
     SWIR2_BAND : string
         The number (as a string) of the SWIR2 band in Sentinel 2 data.
-    
     """
     if sentinel_n == 2:
         RED_BAND = "04"

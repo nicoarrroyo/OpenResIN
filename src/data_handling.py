@@ -3,6 +3,15 @@ import os
 import re
 import hashlib
 
+def get_sen2_bands(high_res):
+    RED_BAND = "04"
+    GREEN_BAND = '03'
+    if high_res:
+        NIR_BAND = '08'
+    else:
+        NIR_BAND = '8A'
+    return GREEN_BAND, NIR_BAND, RED_BAND
+
 def rewrite(write_file, rows):
     """
     Used to remove any blank or blatantly invalid entries in a csv

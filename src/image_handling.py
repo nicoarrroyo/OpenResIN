@@ -12,8 +12,6 @@ from rasterio import features
 from rasterio.windows import from_bounds
 from rasterio.warp import reproject, Resampling
 
-from data_handling import check_duplicate_name
-
 def image_to_array(file_path_s):
     """
     Convert an image or list of images to a numpy array. The image is opened 
