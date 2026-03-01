@@ -42,6 +42,10 @@ def table_print(**kwargs):
         print(f"| {key.ljust(max_var_length)} | {str(value).ljust(max_value_length)} |")
     print(separator)
 
+def failure(failure, solution, error):
+    print(f"FAILURE: {failure} due to {error}")
+    print(f"Trying {solution}")
+
 def confirm_continue_or_exit():
     """
     Asks the user if they want to continue with the program.

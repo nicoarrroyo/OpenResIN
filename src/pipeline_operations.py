@@ -3,6 +3,7 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import csv
 import datetime as dt
+import sys
 
 # %% Third Party Libraries
 import tensorflow as tf
@@ -120,7 +121,7 @@ def one_create_image_arrays(folders_path, folder):
             size = (img.width//10, img.height//10)
             tci_60_array = np.array(img.resize(size))
     
-    print("step 1 complete! finished at {dt.datetime.now().time()}")
+    print(f"step 1 complete! finished at {dt.datetime.now().time()}")
     return image_arrays, image_metadata, prefix, images_path, tci_array, tci_60_array
 
 # %% 2. Masking out known features (iterative)
@@ -158,33 +159,53 @@ def two_mask_known_feature(image_arrays, image_metadata):
         )
     
     for i in range(len(image_arrays)):
-        image_arrays[i] = image_do.known_feature_mask(
-            image_arrays[i], 
-            image_metadata, 
-            rivers_data, 
-            feature_type="rivers", 
-            buffer_metres=20
-            )
-        image_arrays[i] = image_do.known_feature_mask(
-            image_arrays[i], 
-            image_metadata, 
-            boundaries_data, 
-            feature_type="sea"
-            )
-        image_arrays[i] = image_do.known_feature_mask(
-            image_arrays[i], 
-            image_metadata, 
-            known_reservoirs_data, 
-            feature_type="known reservoirs", 
-            buffer_metres=50
-            )
-        image_arrays[i] = image_do.mask_urban_areas( # different process (.tif)
-            image_arrays[i], 
-            image_metadata, 
-            urban_areas_data
-            )
+        try:
+            image_arrays[i] = image_do.known_feature_mask(
+                image_arrays[i], 
+                image_metadata, 
+                rivers_data, 
+                feature_type="rivers", 
+                buffer_metres=20
+                )
+        except Exception as e:
+            print(f"FAILURE: river masking (due to error: {e})")
+            print("TRYING: skip step. User must source the file.")
+            ui_do.confirm_continue_or_exit()
+        try:
+            image_arrays[i] = image_do.known_feature_mask(
+                image_arrays[i], 
+                image_metadata, 
+                boundaries_data, 
+                feature_type="sea"
+                )
+        except Exception as e:
+            print(f"FAILURE: sea masking (due to error: {e})")
+            print("TRYING: skip step. User must source the file.")
+            ui_do.confirm_continue_or_exit()
+        try:
+            image_arrays[i] = image_do.known_feature_mask(
+                image_arrays[i], 
+                image_metadata, 
+                known_reservoirs_data, 
+                feature_type="known reservoirs", 
+                buffer_metres=50
+                )
+        except Exception as e:
+            print(f"FAILURE: known reservoir masking (due to error: {e})")
+            print("TRYING: skip step. User must source the file.")
+            ui_do.confirm_continue_or_exit()
+        try:
+            image_arrays[i] = image_do.mask_urban_areas( # different process (.tif)
+                image_arrays[i], 
+                image_metadata, 
+                urban_areas_data
+                )
+        except Exception as e:
+            print(f"FAILURE: urban area masking (due to error: {e})")
+            print("TRYING: skip step. User must source the file.")
+            ui_do.confirm_continue_or_exit()
     
-    print("step 2 complete! finished at {dt.datetime.now().time()}")
+    print(f"step 2 complete! finished at {dt.datetime.now().time()}")
     return image_arrays
 
 # %% 3. Masking out clouds (OmniCloudMask) (iterative)
@@ -205,8 +226,8 @@ def three_mask_clouds(image_arrays):
         pred_mask_2d = predict_from_array(input_array, 
                                           mosaic_device="cuda")[0]
     except Exception as e:
-        print("WARNING: CUDA call failed, using CPU")
-        print("error:", e)
+        print(f"FAILURE: call to CUDA (due to error: {e})")
+        print("TRYING: use CPU for inference (slower)")
         ui_do.confirm_continue_or_exit()
         pred_mask_2d = predict_from_array(input_array, 
                                           mosaic_device="cpu")[0]
@@ -222,7 +243,7 @@ def three_mask_clouds(image_arrays):
         image_arrays[i] = image_arrays[i].astype(np.float32)
         image_arrays[i][combined_mask] = np.nan
     
-    print("step 3 complete! finished at {dt.datetime.now().time()}")
+    print(f"step 3 complete! finished at {dt.datetime.now().time()}")
     return image_arrays
 
 # %% 4. Compute water indices (iterative)
@@ -250,7 +271,7 @@ def four_compute_indices(image_arrays):
     # evi2 = 2.4 * (nir - red) / (nir + red + 1) # 2-band evi can be useful
     # evi2_arrays_list.append(evi2)
     
-    print("step 4 complete! finished at {dt.datetime.now().time()}")
+    print(f"step 4 complete! finished at {dt.datetime.now().time()}")
     return ndwi
 
 # %% 5. Image compositing (and plotting)
@@ -348,7 +369,7 @@ def six_prepare_data(ndwi_mean, tci_array, folders):
             ans = input("press enter to retry: ").strip().lower()
             if ans.lower() == 'quit':
                 print("quitting")
-                #return ndwi_mean
+                sys.exit()
             if ans.lower() == 'new':
                 print("creating new file")
                 with open(data_file, "w") as file:
@@ -411,165 +432,157 @@ def six_prepare_data(ndwi_mean, tci_array, folders):
         print(f"found {len(invalid_rows)} chunks containing "
                "incomplete, missing, or incorrect coordinate data")
         i = invalid_rows[0]
-        invalid_rows_index = 0
     print(f"step 6 complete! finished at {dt.datetime.now().time()}")
-    return index_chunks, tci_chunks, break_flag, invalid_rows_index
-
+    return [index_chunks, tci_chunks, break_flag, i, data_file, data_correction, 
+            invalid_rows, lines, last_chunk, labelling_path]
 # %% 7. Data labelling
-def seven_label_data():
+def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array, 
+                     data_file, data_correction, invalid_rows, 
+                     lines, last_chunk):
     # %%% 7. Data Labelling
-    print("==========")
-    print("| STEP 7 |")
-    print("==========")
-    if not c.LABEL_DATA:
-        print("not labelling data")
-    else:
-        print("data labelling start")
+    print("data labelling start")
+    break_flag = False
+    
+    # %%%% 7.1 Outputting Images
+    print("outputting images...")
+    invalid_rows_index = 0
+    
+    while i < len(index_chunks):
+        if break_flag:
+            break
+        image_do.plot_chunks(ndwi_mean, index_chunks, c.PLOT_SIZE_CHUNKS, i, 
+                    c.TITLE_SIZE, c.LABEL_SIZE, tci_chunks, tci_60_array)
+        max_index = [0, 0]
+        max_index[0] = round(np.nanmax(index_chunks[i]), 2)
+        print(f"MAX ADJUSTED NDWI: {max_index[0]}", end=" | ")
+        max_index[1] = round(np.nanmax(index_chunks[i]), 2)
+        print(f"MAX NDWI: {max_index[1]}")
         
-        # %%%% 7.1 Outputting Images
-        print("outputting images...")
-        
-        while i < len(index_chunks):
-            if break_flag:
-                break
-            plot_chunks(ndwi_mean, index_chunks, c.PLOT_SIZE_CHUNKS, i, 
-                        c.TITLE_SIZE, c.LABEL_SIZE, tci_chunks, tci_60_array)
-            max_index = [0, 0]
-            max_index[0] = round(np.nanmax(index_chunks[i]), 2)
-            print(f"MAX ADJUSTED NDWI: {max_index[0]}", end=" | ")
-            max_index[1] = round(np.nanmax(index_chunks[i]), 2)
-            print(f"MAX NDWI: {max_index[1]}")
-            
-            # %%%% 7.2 User Labelling
-            blank_entry_check(file=data_file)
-            if data_correction:
-                print((
-                    "this chunk "
-                    f"({invalid_rows_index+1}/{len(invalid_rows)})"
-                    " should contain "
-                    f"{int(lines[i+1].split(',')[1])} reservoirs and "
-                    f"{int(lines[i+1].split(',')[2])} non-reservoir "
-                    "water bodies"
-                    ))
-            n_reservoirs = input("how many reservoirs? ").strip().lower()
-            n_bodies = ""
-            entry_list = []
-            while True:
-                blank_entry_check(file=data_file)
-                back_flag = False
-                try:
-                    # %%%%% 7.2.1 Regular integer response
-                    """Parse integer input for reservoirs and bodies, enfore 
-                    maximum limits, and prompt ROI drawing and collect 
-                    coordinates."""
-                    # handle number of reservoirs entry
-                    n_reservoirs = int(n_reservoirs)
-                    entry_list = [i,n_reservoirs,""]
-                    while n_reservoirs > 5: # NOTE add user input type check
-                        print("maximum of 5 reservoirs")
-                        n_reservoirs = input("how many "
-                                             "reservoirs? ").strip().lower()
-                    if n_reservoirs != 0:
-                        print("please draw a square around the reservoir(s)", 
-                              flush=True)
-                        chunk_coords = prompt_roi(tci_chunks[i], n_reservoirs)
-                        for coord in chunk_coords:
-                            entry_list.append(coord)
-                    while len(entry_list) < 8:
-                        entry_list.append("")
-                     
-                    # handle number of non-reservoir water bodies entry
-                    n_bodies = input("how many non-reservoir "
-                                     "water bodies? ").strip().lower()
-                    n_bodies = int(n_bodies)
-                    entry_list[2] = n_bodies
-                    if n_bodies != 0:
-                        print("please draw a square around the water bodies", 
-                              flush=True)
-                        chunk_coords = prompt_roi(tci_chunks[i], n_bodies)
-                        for coord in chunk_coords:
-                            entry_list.append(coord)
-                    i += 1
-                    print("generating next chunk...", flush=True)
-                    break # exit loop and continue to next chunk
-                
-                # handle non-integer responses
-                except:
-                    n_reservoirs = str(n_reservoirs)
-                    n_bodies = str(n_bodies)
-                    if "break" in n_bodies or "break" in n_reservoirs:
-                        # %%%%% 7.2.2 Non-integer response: "break"
-                        """nico!! remember to add a description!"""
-                        print("taking a break")
-                        break_flag = True
-                        break
-                    if "back" in n_bodies or "back" in n_reservoirs:
-                        # %%%%% 7.2.3 Non-integer response: "back"
-                        """nico!! remember to add a description!"""
-                        back_flag = True
-                        if data_correction:
-                            print("cannot use 'back' during data correction")
-                            break
-                        try:
-                            n_backs = int(n_reservoirs.split(" ")[1])
-                        except:
-                            n_backs = 1
-                        i -= n_backs
-                        check_file_permission(file_name=data_file)
-                        with open(data_file, mode="r") as re: # read
-                            rows = list(csv.reader(re))
-                        for j in range(n_backs):
-                            rows.pop() # remove the last "n_backs" rows
-                        with open(data_file, mode="w") as wr: # write
-                            rewrite(write_file=wr, rows=rows)
-                        break
-                    # %%%%% 7.2.4 Non-integer response: error
-                    """nico!! remember to add a description!"""
-                    print("error: non-integer response."
-                          "\ntype 'break' to save and quit"
-                          "\ntype 'back' to go to previous chunk")
+        # %%%% 7.2 User Labelling
+        data_do.blank_entry_check(file=data_file)
+        if data_correction:
+            print((
+                "this chunk "
+                f"({invalid_rows_index+1}/{len(invalid_rows)})"
+                " should contain "
+                f"{int(lines[i+1].split(',')[1])} reservoirs and "
+                f"{int(lines[i+1].split(',')[2])} non-reservoir "
+                "water bodies"
+                ))
+        n_reservoirs = input("how many reservoirs? ").strip().lower()
+        n_bodies = ""
+        entry_list = []
+        while True:
+            data_do.blank_entry_check(file=data_file)
+            back_flag = False
+            try:
+                # %%%%% 7.2.1 Regular integer response
+                """Parse integer input for reservoirs and bodies, enfore 
+                maximum limits, and prompt ROI drawing and collect 
+                coordinates."""
+                # handle number of reservoirs entry
+                n_reservoirs = int(n_reservoirs)
+                entry_list = [i,n_reservoirs,""]
+                while n_reservoirs > 5: # NOTE add user input type check
+                    print("maximum of 5 reservoirs")
                     n_reservoirs = input("how many "
                                          "reservoirs? ").strip().lower()
+                if n_reservoirs != 0:
+                    print("please draw a square around the reservoir(s)", 
+                          flush=True)
+                    chunk_coords = ui_do.prompt_roi(tci_chunks[i], n_reservoirs)
+                    for coord in chunk_coords:
+                        entry_list.append(coord)
+                while len(entry_list) < 8:
+                    entry_list.append("")
+                 
+                # handle number of non-reservoir water bodies entry
+                n_bodies = input("how many non-reservoir "
+                                 "water bodies? ").strip().lower()
+                n_bodies = int(n_bodies)
+                entry_list[2] = n_bodies
+                if n_bodies != 0:
+                    print("please draw a square around the water bodies", 
+                          flush=True)
+                    chunk_coords = ui_do.prompt_roi(tci_chunks[i], n_bodies)
+                    for coord in chunk_coords:
+                        entry_list.append(coord)
+                i += 1
+                print("generating next chunk...", flush=True)
+                break # exit loop and continue to next chunk
             
-            # %%%% 7.3 Saving Results
-            """nico!! remember to add a description!"""
-            if break_flag:
-                break
-            if not break_flag and not back_flag:
-                check_file_permission(file_name=data_file)
-                csv_entry = ""
-                first_csv_entry = True
-                for entry in entry_list:
-                    if first_csv_entry:
-                        csv_entry = f"{entry}"
-                    elif not first_csv_entry:
-                        csv_entry = f"{csv_entry},{entry}"
-                    first_csv_entry = False
-                if data_correction: # add coordinates to data
-                    lines[i] = f"{csv_entry}\n"
+            # handle non-integer responses
+            except:
+                n_reservoirs = str(n_reservoirs)
+                n_bodies = str(n_bodies)
+                if "break" in n_bodies or "break" in n_reservoirs:
+                    # %%%%% 7.2.2 Non-integer response: "break"
+                    """nico!! remember to add a description!"""
+                    print("taking a break")
+                    break_flag = True
+                    break
+                if "back" in n_bodies or "back" in n_reservoirs:
+                    # %%%%% 7.2.3 Non-integer response: "back"
+                    """nico!! remember to add a description!"""
+                    back_flag = True
+                    if data_correction:
+                        print("cannot use 'back' during data correction")
+                        break
+                    try:
+                        n_backs = int(n_reservoirs.split(" ")[1])
+                    except:
+                        n_backs = 1
+                    i -= n_backs
+                    ui_do.check_file_permission(file_name=data_file)
+                    with open(data_file, mode="r") as re: # read
+                        rows = list(csv.reader(re))
+                    for j in range(n_backs):
+                        rows.pop() # remove the last "n_backs" rows
                     with open(data_file, mode="w") as wr: # write
-                        for j in range(len(lines)):
-                            current_entry = lines[j]
-                            wr.write(f"{current_entry}")
-                    invalid_rows_index += 1
-                    if invalid_rows_index >= len(invalid_rows):
-                        i = last_chunk + 1
-                        data_correction = False
-                    else:
-                        i = invalid_rows[invalid_rows_index]
-                else: # convert entry_list to a string for csv
-                    with open(data_file, mode="a") as ap: # append
-                        ap.write(f"\n{csv_entry}")
-        print(f"step 7 complete! finished at {dt.datetime.now().time()}")
+                        data_do.rewrite(write_file=wr, rows=rows)
+                    break
+                # %%%%% 7.2.4 Non-integer response: error
+                """nico!! remember to add a description!"""
+                print("error: non-integer response."
+                      "\ntype 'break' to save and quit"
+                      "\ntype 'back' to go to previous chunk")
+                n_reservoirs = input("how many "
+                                     "reservoirs? ").strip().lower()
+        
+        # %%%% 7.3 Saving Results
+        """nico!! remember to add a description!"""
+        if break_flag:
+            break
+        if not break_flag and not back_flag:
+            data_do.check_file_permission(file_name=data_file)
+            csv_entry = ""
+            first_csv_entry = True
+            for entry in entry_list:
+                if first_csv_entry:
+                    csv_entry = f"{entry}"
+                elif not first_csv_entry:
+                    csv_entry = f"{csv_entry},{entry}"
+                first_csv_entry = False
+            if data_correction: # add coordinates to data
+                lines[i] = f"{csv_entry}\n"
+                with open(data_file, mode="w") as wr: # write
+                    for j in range(len(lines)):
+                        current_entry = lines[j]
+                        wr.write(f"{current_entry}")
+                invalid_rows_index += 1
+                if invalid_rows_index >= len(invalid_rows):
+                    i = last_chunk + 1
+                    data_correction = False
+                else:
+                    i = invalid_rows[invalid_rows_index]
+            else: # convert entry_list to a string for csv
+                with open(data_file, mode="a") as ap: # append
+                    ap.write(f"\n{csv_entry}")
+    print(f"step 7 complete! finished at {dt.datetime.now().time()}")
     return
 
 # %% 8. Data segmentation
-def eight_segment_data():
-    # %%% 8. Data Segmentation
-    print("==========")
-    print("| STEP 8 |")
-    print("==========")
-
+def eight_segment_data(data_file, index_chunks, labelling_path):
     # %%%% 8.1 Extract Reservoir and Water Body Coordinates
     """nico!! remember to add a description!"""
     if not c.HIGH_RES:
@@ -601,38 +614,38 @@ def eight_segment_data():
             res_rows.append(lines[i])
             if int(res_rows[-1][1]) > 1:
                 for j in range(3, 3+int(res_rows[-1][1])):
-                    res_coords.append((i, extract_coords(res_rows[-1][j], 
-                                                         create_box_flag=True)))
+                    res_coords.append((i, data_do.extract_coords(res_rows[-1][j], 
+                                                                 create_box_flag=True)))
             elif int(res_rows[-1][1]) == 1:
-                res_coords.append((i, extract_coords(res_rows[-1][3], 
-                                                     create_box_flag=True)))
+                res_coords.append((i, data_do.extract_coords(res_rows[-1][3], 
+                                                             create_box_flag=True)))
         
         # if there is a water body
         if int(lines[i][2]) > 0:
             body_rows.append(lines[i])
-            first_coords = extract_coords(body_rows[-1][8], 
-                                          create_box_flag=False)
+            first_coords = data_do.extract_coords(body_rows[-1][8], 
+                                                  create_box_flag=False)
             # and the water body is not the sea
             if first_coords[0] != 0 and first_coords[-1] != 157:
                 if int(body_rows[-1][2]) > 1:
                     for j in range(8, 8+int(body_rows[-1][2])):
-                        this_coord = extract_coords(body_rows[-1][j], 
-                                                    create_box_flag=True)
+                        this_coord = data_do.extract_coords(body_rows[-1][j], 
+                                                            create_box_flag=True)
                         body_coords.append((i, this_coord))
                 elif int(body_rows[-1][2]) == 1:
-                    this_coord = extract_coords(body_rows[-1][8], 
-                                                  create_box_flag=True)
+                    this_coord = data_do.extract_coords(body_rows[-1][8], 
+                                                        create_box_flag=True)
                     body_coords.append((i, this_coord))
             else:# if it IS the sea, save a minichunk of it too
                 sea_rows.append(lines[i])
-                sea_coords.append((i, extract_coords(none_coord, 
-                                                  create_box_flag=True)))
+                sea_coords.append((i, data_do.extract_coords(none_coord, 
+                                                             create_box_flag=True)))
         
         # if it's just land, save a minichunk of it too
         if int(lines[i][1]) == 0 and int(lines[i][2]) == 0:
             land_rows.append(lines[i])
-            land_coords.append((i, extract_coords(none_coord, 
-                                                  create_box_flag=True)))
+            land_coords.append((i, data_do.extract_coords(none_coord, 
+                                                          create_box_flag=True)))
         
     # %%%% 8.2 Isolate and Save an Image of Each Reservoir and Water Body
     """nico!! remember to add a description! 0.4*max to bring down the ceiling 
@@ -676,13 +689,13 @@ def eight_segment_data():
                 chunk_n = int(coords_list[i][0]) - 1
                 coordinates = coords_list[i][1]
                 
-                rgb_data = get_rgb_data(
+                rgb_data = image_do.get_rgb_data(
                     data=valid_chunks, 
                     chunk_n=chunk_n, 
                     coordinates=coordinates, 
                     g_min=global_min, g_max=global_max)
                 
-                tf_example = create_tf_example(
+                tf_example = image_do.create_tf_example(
                     image_array=rgb_data, 
                     class_index=class_index, 
                     class_name_str=class_name)
@@ -694,9 +707,9 @@ def eight_segment_data():
         if ".tfrecord" in path:
             existing_records.append(path)
 
-    hash1 = hash_tfrecord(tfrecord_file_location)
+    hash1 = data_do.hash_tfrecord(tfrecord_file_location)
     for record in existing_records:
-        hash2 = hash_tfrecord(os.path.join(labelling_path, record))
+        hash2 = data_do.hash_tfrecord(os.path.join(labelling_path, record))
         duplicate = bool(hash1 == hash2)
         if duplicate:
             print("found duplicate tf record data")
@@ -715,7 +728,6 @@ def eight_segment_data():
             break
 
     print(f"wrote all available training data to {tfrecord_filename}")
-
     print(f"step 8 complete! finished at {dt.datetime.now().time()}")
 
     return

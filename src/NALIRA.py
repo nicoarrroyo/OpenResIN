@@ -63,14 +63,12 @@ ui_do.table_print(n_chunks=c.N_CHUNKS, high_res=c.HIGH_RES, resolution=c.RES,
                   labelling=c.LABEL_DATA)
 
 ndwi_arrays_list = []
-# ndvi_arrays_list = []
-# evi_arrays_list = []
-# evi2_arrays_list = []
 tci_array = []
 tci_60_array = []
 
 folders_path = os.path.join(c.HOME_DIR, "data", "sentinel_2")
 folders = ui_do.list_folders(folders_path)
+
     # %% 1. Create Image Arrays
 for folder in folders:
     [image_arrays, 
@@ -81,27 +79,71 @@ for folder in folders:
      tci_60_array] = operation.one_create_image_arrays(folders_path, folder)
     
     # %% 2. Mask Known Features
-    image_arrays = operation.two_mask_known_feature(image_arrays, image_metadata)
+    if c.KNOWN_FEATURE_MASKING:
+        image_arrays = operation.two_mask_known_feature(image_arrays, image_metadata)
+    else:
+        print("skipping known feature masking")
     
     # %% 3. Mask Clouds (Omnicloudmask)
-    image_arrays = operation.three_mask_clouds(image_arrays)
+    if c.CLOUD_MASKING:
+        image_arrays = operation.three_mask_clouds(image_arrays)
+    else:
+        print("skipping cloud masking")
     
     # %% 4. Calculate Spectral Indices
     ndwi = operation.four_compute_indices(image_arrays)
     ndwi_arrays_list.append(ndwi)
 
 # %% 5. Composite Images (and plot)
-ndwi_mean = operation.five_composite(ndwi_arrays_list, folder)
+ndwi_mean = operation.five_composite(ndwi_arrays_list)
 if c.SHOW_INDEX_PLOTS:
     operation.fiveb_plot(ndwi_mean, folders_path)
 else:
-    print("not displaying water index images")
+    print("skipping water index image display")
 
 # %% 6. Prepare Labelling Data
-
+if c.LABEL_DATA:
+    [
+     index_chunks, 
+     tci_chunks, 
+     break_flag, 
+     i, 
+     data_file, 
+     data_correction, 
+     invalid_rows, 
+     lines, 
+     last_chunk, 
+     labelling_path
+     ] = operation.six_prepare_data(
+         ndwi_mean, 
+         tci_array, 
+         folders
+         )
+else:
+    print("skipping data preparation")
 
 # %% 7. Label Data
-
+if c.LABEL_DATA:
+    operation.seven_label_data(
+         i, 
+         index_chunks, 
+         ndwi_mean, 
+         tci_chunks, 
+         tci_60_array, 
+         data_file, 
+         data_correction, 
+         invalid_rows, 
+         lines, 
+         last_chunk
+         )
+else:
+    print("skipping data labelling")
 
 # %% 8. Save Labelling Results
+[
+ tepm
+ ] = operation.eight_segment_data(
+     data_file, 
+     index_chunks, 
+     labelling_path)
 
