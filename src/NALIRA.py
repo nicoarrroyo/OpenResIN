@@ -140,10 +140,5 @@ else:
     print("skipping data labelling")
 
 # %% 8. Save Labelling Results
-[
- tepm
- ] = operation.eight_segment_data(
-     data_file, 
-     index_chunks, 
-     labelling_path)
+operation.eight_segment_data(data_file, index_chunks, labelling_path)
 

@@ -131,7 +131,7 @@ def mask_urban_areas(image_array, image_metadata, urban_data_path):
                 resampling=Resampling.nearest
                 )
             
-            urban_mask = (reprojected_urban_data == 20) | (reprojected_urban_data == 21)
+            urban_mask = (reprojected_urban_data==20)|(reprojected_urban_data==21)
         else:
             urban_mask = (urban_data_window == 20) | (urban_data_window == 21)
         
@@ -381,7 +381,40 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i, title_size,
     plt.tight_layout()
     plt.show()
 
-#def save_image_file(data, image_name)
+def get_ndwi_patch(data, chunk_n, coordinates, g_min, g_max):
+    """
+    Extract a 2D NDWI patch from a chunk using labelled coordinates.
+    Returns a float32 array of shape (H, W), with NaN values preserved.
+    Normalisation to uint8 is handled by the caller (eight_segment_data).
+
+    Parameters
+    ----------
+    data : list of numpy arrays
+        List of valid (non-all-NaN) NDWI chunks.
+    chunk_n : int
+        Index into data for the chunk to crop from.
+    coordinates : array-like of length 4
+        [upper-left-x, upper-left-y, lower-right-x, lower-right-y] in pixels.
+    g_min : float
+        Global minimum NDWI value, used by the caller for normalisation.
+    g_max : float
+        Global maximum NDWI value (pre-scaled), used by the caller for
+        normalisation.
+
+    Returns
+    -------
+    cropped_data : numpy array, float32, shape (H, W)
+        The extracted NDWI patch. Returns an empty float32 array if the crop
+        region is zero-sized (e.g. coordinates are out of bounds).
+    """
+    iulx, iuly, ilrx, ilry = map(int, coordinates)
+    iulx = max(0, iulx)
+    iuly = max(0, iuly)
+    ilrx = min(data[chunk_n].shape[1], ilrx)
+    ilry = min(data[chunk_n].shape[0], ilry)
+
+    cropped_data = data[chunk_n][iuly:ilry, iulx:ilrx].astype(np.float32)
+    return cropped_data
 
 def get_rgb_data(data, chunk_n, coordinates, g_min, g_max):
     iulx, iuly, ilrx, ilry = map(int, coordinates)

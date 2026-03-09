@@ -6,7 +6,6 @@ import datetime as dt
 import sys
 
 # %% Third Party Libraries
-import tensorflow as tf
 import numpy as np
 from PIL import Image
 from omnicloudmask import predict_from_array
@@ -439,11 +438,11 @@ def six_prepare_data(ndwi_mean, tci_array, folders):
 def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array, 
                      data_file, data_correction, invalid_rows, 
                      lines, last_chunk):
-    # %%% 7. Data Labelling
+    # ### 7. Data Labelling
     print("data labelling start")
     break_flag = False
     
-    # %%%% 7.1 Outputting Images
+    # #### 7.1 Outputting Images
     print("outputting images...")
     invalid_rows_index = 0
     
@@ -458,7 +457,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
         max_index[1] = round(np.nanmax(index_chunks[i]), 2)
         print(f"MAX NDWI: {max_index[1]}")
         
-        # %%%% 7.2 User Labelling
+        # #### 7.2 User Labelling
         data_do.blank_entry_check(file=data_file)
         if data_correction:
             print((
@@ -476,7 +475,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
             data_do.blank_entry_check(file=data_file)
             back_flag = False
             try:
-                # %%%%% 7.2.1 Regular integer response
+                # #### 7.2.1 Regular integer response
                 """Parse integer input for reservoirs and bodies, enfore 
                 maximum limits, and prompt ROI drawing and collect 
                 coordinates."""
@@ -516,13 +515,13 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                 n_reservoirs = str(n_reservoirs)
                 n_bodies = str(n_bodies)
                 if "break" in n_bodies or "break" in n_reservoirs:
-                    # %%%%% 7.2.2 Non-integer response: "break"
+                    # ##### 7.2.2 Non-integer response: "break"
                     """nico!! remember to add a description!"""
                     print("taking a break")
                     break_flag = True
                     break
                 if "back" in n_bodies or "back" in n_reservoirs:
-                    # %%%%% 7.2.3 Non-integer response: "back"
+                    # ##### 7.2.3 Non-integer response: "back"
                     """nico!! remember to add a description!"""
                     back_flag = True
                     if data_correction:
@@ -541,7 +540,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                     with open(data_file, mode="w") as wr: # write
                         data_do.rewrite(write_file=wr, rows=rows)
                     break
-                # %%%%% 7.2.4 Non-integer response: error
+                # ##### 7.2.4 Non-integer response: error
                 """nico!! remember to add a description!"""
                 print("error: non-integer response."
                       "\ntype 'break' to save and quit"
@@ -549,7 +548,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                 n_reservoirs = input("how many "
                                      "reservoirs? ").strip().lower()
         
-        # %%%% 7.3 Saving Results
+        # #### 7.3 Saving Results
         """nico!! remember to add a description!"""
         if break_flag:
             break
@@ -583,151 +582,166 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
 
 # %% 8. Data segmentation
 def eight_segment_data(data_file, index_chunks, labelling_path):
-    # %%%% 8.1 Extract Reservoir and Water Body Coordinates
-    """nico!! remember to add a description!"""
+    # #### 8.1 Extract Reservoir and Water Body Coordinates
+    """Reads the labelled CSV file and builds per-class coordinate lists.
+    Each entry in a coords list is a tuple of (line_index, coordinates),
+    where coordinates are the pixel bounds of a labelled region inside its
+    chunk. Land and sea entries use a fixed centre-crop placeholder so that
+    they go through the same extraction path as the labelled classes."""
     if not c.HIGH_RES:
         print("high resolution setting must be activated for data segmentation")
         print("exiting program")
-        #return ndwi_mean
+        return
     print("data segmentation start")
 
-    res_rows = []
-    res_coords = []
+    res_rows   = [];  res_coords  = []
+    body_rows  = [];  body_coords = []
+    land_rows  = [];  land_coords = []
+    sea_rows   = [];  sea_coords  = []
 
-    body_rows = []
-    body_coords = []
-
-    land_rows = []
-    land_coords = []
-    none_coord = "[50.0 50.0 55.0 55.0]" # replicate res and bod coords format
-    # allows it to be passed as an argument of extract_coords
-
-    sea_rows = []
-    sea_coords = []
+    # placeholder coord – centred crop used for unlabelled land / sea chunks
+    none_coord = "[50.0 50.0 55.0 55.0]"
 
     with open(data_file, "r") as file:
         lines = file.readlines()
 
     for i in range(1, len(lines)):
         lines[i] = lines[i].split(",")
-        if int(lines[i][1]) > 0: # if there is a reservoir
+
+        if int(lines[i][1]) > 0:   # ---- reservoirs ----
             res_rows.append(lines[i])
-            if int(res_rows[-1][1]) > 1:
-                for j in range(3, 3+int(res_rows[-1][1])):
-                    res_coords.append((i, data_do.extract_coords(res_rows[-1][j], 
-                                                                 create_box_flag=True)))
-            elif int(res_rows[-1][1]) == 1:
-                res_coords.append((i, data_do.extract_coords(res_rows[-1][3], 
-                                                             create_box_flag=True)))
-        
-        # if there is a water body
-        if int(lines[i][2]) > 0:
+            n = int(res_rows[-1][1])
+            col_range = range(3, 3 + n) if n > 1 else [3]
+            for j in col_range:
+                res_coords.append(
+                    (i, data_do.extract_coords(res_rows[-1][j],
+                                               create_box_flag=True)))
+
+        if int(lines[i][2]) > 0:   # ---- water bodies / sea ----
             body_rows.append(lines[i])
-            first_coords = data_do.extract_coords(body_rows[-1][8], 
+            first_coords = data_do.extract_coords(body_rows[-1][8],
                                                   create_box_flag=False)
-            # and the water body is not the sea
-            if first_coords[0] != 0 and first_coords[-1] != 157:
-                if int(body_rows[-1][2]) > 1:
-                    for j in range(8, 8+int(body_rows[-1][2])):
-                        this_coord = data_do.extract_coords(body_rows[-1][j], 
-                                                            create_box_flag=True)
-                        body_coords.append((i, this_coord))
-                elif int(body_rows[-1][2]) == 1:
-                    this_coord = data_do.extract_coords(body_rows[-1][8], 
-                                                        create_box_flag=True)
-                    body_coords.append((i, this_coord))
-            else:# if it IS the sea, save a minichunk of it too
+            is_sea = (first_coords[0] == 0 and first_coords[-1] == 157)
+            if not is_sea:
+                n = int(body_rows[-1][2])
+                col_range = range(8, 8 + n) if n > 1 else [8]
+                for j in col_range:
+                    body_coords.append(
+                        (i, data_do.extract_coords(body_rows[-1][j],
+                                                   create_box_flag=True)))
+            else:
                 sea_rows.append(lines[i])
-                sea_coords.append((i, data_do.extract_coords(none_coord, 
-                                                             create_box_flag=True)))
-        
-        # if it's just land, save a minichunk of it too
-        if int(lines[i][1]) == 0 and int(lines[i][2]) == 0:
+                sea_coords.append(
+                    (i, data_do.extract_coords(none_coord,
+                                               create_box_flag=True)))
+
+        if int(lines[i][1]) == 0 and int(lines[i][2]) == 0:   # ---- land ----
             land_rows.append(lines[i])
-            land_coords.append((i, data_do.extract_coords(none_coord, 
-                                                          create_box_flag=True)))
-        
-    # %%%% 8.2 Isolate and Save an Image of Each Reservoir and Water Body
-    """nico!! remember to add a description! 0.4*max to bring down the ceiling 
-    of ndwi so that reservoir and water bodies are better highlighted"""
-    valid_chunks = [chunk
-                    for chunk in index_chunks
+            land_coords.append(
+                (i, data_do.extract_coords(none_coord,
+                                           create_box_flag=True)))
+
+    # #### 8.2 Compute global NDWI normalisation bounds
+    """0.4 * global_max brings the ceiling down so that water features are
+    better differentiated in the saved greyscale images."""
+    valid_chunks = [chunk for chunk in index_chunks
                     if not np.all(np.isnan(chunk))]
     if valid_chunks:
         global_min = min(np.nanmin(chunk) for chunk in valid_chunks)
-        global_max = 0.4*max(np.nanmax(chunk) for chunk in valid_chunks)
+        global_max = 0.4 * max(np.nanmax(chunk) for chunk in valid_chunks)
     else:
-        global_max = 0
         global_min = np.nan
+        global_max = 0.0
         print("Warning: All NDWI chunks contained only NaN values.")
 
-    # %%%% 8.3 Create a Single TFRecord File to Store Training Data
-    class_names = ["reservoirs", "water bodies", "land", "sea"]
-    class_map = {name: i for i, name in enumerate(class_names)}
+    # #### 8.3 Save PNG Training Images per Class
+    """One sub-folder per class is created inside labelling_path. Each
+    extracted NDWI patch is normalised to [0, 255] and saved as an 8-bit
+    greyscale PNG.
 
-    tfrecord_filename = "training_data.tfrecord"
+    To add a new class, append a (coords_list, "class-name") tuple to
+    all_coords below – no other changes are needed."""
 
-    # check for file name already existing and increment file name
-    counter = 1
-    base_name, extension = tfrecord_filename.split(".")
-    while os.path.exists(os.path.join(labelling_path, tfrecord_filename)):
-        counter += 1
-        tfrecord_filename = f"{base_name}_{counter}.{extension}"
+    # --- class definitions (extend this list to add new classes) ---
+    all_coords = [
+        (res_coords,  "reservoirs"),
+        (body_coords, "water-bodies"),
+        (land_coords, "land"),
+        (sea_coords,  "sea"),
+    ]
 
-    tfrecord_file_location = os.path.join(labelling_path, tfrecord_filename)
-    with tf.io.TFRecordWriter(tfrecord_file_location) as tf_writer:
-        all_coords = [(res_coords, "reservoirs"), 
-                      (body_coords, "water bodies"), 
-                      (land_coords, "land"), 
-                      (sea_coords, "sea")]
-        
-        for coords_list, class_name in all_coords:
-            print(f"{len(coords_list)} examples for class {class_name}")
-            class_index = class_map[class_name]
-            
-            for i in range(len(coords_list)):
-                chunk_n = int(coords_list[i][0]) - 1
-                coordinates = coords_list[i][1]
-                
-                rgb_data = image_do.get_rgb_data(
-                    data=valid_chunks, 
-                    chunk_n=chunk_n, 
-                    coordinates=coordinates, 
-                    g_min=global_min, g_max=global_max)
-                
-                tf_example = image_do.create_tf_example(
-                    image_array=rgb_data, 
-                    class_index=class_index, 
-                    class_name_str=class_name)
-                
-                tf_writer.write(tf_example.SerializeToString())
+    saved_counts = {}
 
-    existing_records = []
-    for path in os.listdir(labelling_path):
-        if ".tfrecord" in path:
-            existing_records.append(path)
+    for coords_list, class_name in all_coords:
+        print(f"{len(coords_list)} examples for class '{class_name}'")
 
-    hash1 = data_do.hash_tfrecord(tfrecord_file_location)
-    for record in existing_records:
-        hash2 = data_do.hash_tfrecord(os.path.join(labelling_path, record))
-        duplicate = bool(hash1 == hash2)
-        if duplicate:
-            print("found duplicate tf record data")
-            try:
-                new_save_location = os.path.join(labelling_path, 
-                                                 f"DUPLICATE_{record}")
-                os.rename(tfrecord_file_location, new_save_location)
-                print(f"tf record file renamed to DUPLICATE_{record}")
-                tfrecord_filename = f"DUPLICATE_{record}"
-                tfrecord_file_location = os.path.join(labelling_path, 
-                                                      tfrecord_filename)
-            except FileNotFoundError:
-                print("tf record file not found")
-            except PermissionError:
-                print("permission denied. unable to rename the tf record file")
-            break
+        # create class sub-folder
+        class_dir = os.path.join(labelling_path, class_name)
+        os.makedirs(class_dir, exist_ok=True)
 
-    print(f"wrote all available training data to {tfrecord_filename}")
+        # find the highest existing image index to avoid overwriting
+        existing = [f for f in os.listdir(class_dir) if f.endswith(".png")]
+        if existing:
+            indices = []
+            for name in existing:
+                try:
+                    indices.append(int(os.path.splitext(name)[0].split("_")[-1]))
+                except ValueError:
+                    pass
+            start_index = max(indices) + 1 if indices else 0
+        else:
+            start_index = 0
+
+        saved = 0
+        for idx, (chunk_n_raw, coordinates) in enumerate(coords_list):
+            chunk_n = int(chunk_n_raw) - 1
+
+            # bounds-check against valid_chunks length
+            if chunk_n < 0 or chunk_n >= len(valid_chunks):
+                print(f"  skipping out-of-range chunk {chunk_n} "
+                      f"for class '{class_name}'")
+                continue
+
+            # extract normalised NDWI patch (float32, shape H×W)
+            ndwi_patch = image_do.get_ndwi_patch(
+                data=valid_chunks,
+                chunk_n=chunk_n,
+                coordinates=coordinates,
+                g_min=global_min,
+                g_max=global_max,
+            )
+
+            if ndwi_patch is None or ndwi_patch.size == 0:
+                print(f"  skipping empty patch (chunk {chunk_n}, "
+                      f"class '{class_name}')")
+                continue
+
+            # normalise to uint8 [0, 255]
+            patch_clipped = np.clip(ndwi_patch, global_min, global_max)
+            if global_max != global_min:
+                patch_norm = ((patch_clipped - global_min)
+                              / (global_max - global_min) * 255)
+            else:
+                patch_norm = np.zeros_like(patch_clipped)
+            patch_uint8 = patch_norm.astype(np.uint8)
+
+            # replace NaN-derived zeros with mid-grey so they are visually
+            # distinguishable from true zero-valued pixels
+            nan_mask = np.isnan(ndwi_patch)
+            patch_uint8[nan_mask] = 128
+
+            img = Image.fromarray(patch_uint8, mode="L")  # greyscale PNG
+            image_index = start_index + saved
+            file_name = f"image_{image_index:04d}.png"
+            img.save(os.path.join(class_dir, file_name))
+            saved += 1
+
+        saved_counts[class_name] = saved
+        print(f"  saved {saved} images to "
+              f"{os.path.relpath(class_dir, labelling_path)}/")
+
+    total = sum(saved_counts.values())
+    print(f"saved {total} PNG training images across "
+          f"{len(all_coords)} classes")
     print(f"step 8 complete! finished at {dt.datetime.now().time()}")
-
     return
