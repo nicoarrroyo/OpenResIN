@@ -82,11 +82,11 @@ def list_folders(folders_path):
         n_images = len(folders)
     else:
         n_images = c.N_IMAGES
-    folders = folders[:n_images]
     
     for folder in folders:
         if len(folder) > 10 and ".SAFE" in folder[5:]:
             filtered_folders.append(folder)
+    filtered_folders = filtered_folders[:n_images]
     
     image_info = defaultdict(list)
     for folder in filtered_folders:
