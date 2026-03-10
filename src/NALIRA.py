@@ -121,7 +121,7 @@ for folder_num, folder in enumerate(folders):
 print("----------")
 print("| STEP 5 |")
 print("----------")
-stms = operation.five_composite(index_arrays["ndwi"])
+stms = operation.five_composite(index_arrays)
 ndwi_mean = stms["ndwi"]["median"] # temporary. will replace with full stm
 
 if c.SHOW_INDEX_PLOTS:
