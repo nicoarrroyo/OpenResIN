@@ -744,9 +744,10 @@ def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
             patch_uint8[nan_mask] = 128
             
             img = Image.fromarray(patch_uint8, mode="L") # greyscale PNG
-            img_tile = f"{prefix.split('_')[0]}_{prefix.split('_')[1].split('T')[0]}"
+            img_tile = str(prefix.split('_')[0])
+            img_date = str(prefix.split('_')[1].split('T')[0])
             img_index = start_index + saved
-            file_name = f"{img_tile}-{img_index:04d}.png"
+            file_name = f"{img_tile}-{img_date}-{img_index:04d}.png"
             img.save(os.path.join(class_dir, file_name))
             saved += 1
 
