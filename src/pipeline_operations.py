@@ -296,26 +296,30 @@ def five_composite(index_arrays):
         
         stack = np.stack(arrays_list) # takes under 1 second
         
-        print(f"starting median at {dt.datetime.now().time():%H:%M:%S}")
-        index_median = np.nanpercentile(stack, 50, axis=0); # takes two minutes
-        print(f"completed median at {dt.datetime.now().time():%H:%M:%S}")
-        
-        print(f"started 25th percentile at {dt.datetime.now().time():%H:%M:%S}")
-        index_p25 = np.nanpercentile(stack, 25, axis=0) # takes two minutes
-        print(f"completed 25th percentile at {dt.datetime.now().time():%H:%M:%S}")
-        
-        print("started 75th percentile at {dt.datetime.now().time():%H:%M:%S}")
-        index_p75 = np.nanpercentile(stack, 75, axis=0) # takes two minutes
-        print(f"completed 75th percentile at {dt.datetime.now().time():%H:%M:%S}")
+# =============================================================================
+#         print(f"starting median at {dt.datetime.now().time():%H:%M:%S}")
+#         index_median = np.nanpercentile(stack, 50, axis=0); # takes two minutes
+#         print(f"completed median at {dt.datetime.now().time():%H:%M:%S}")
+#         
+#         print(f"started 25th percentile at {dt.datetime.now().time():%H:%M:%S}")
+#         index_p25 = np.nanpercentile(stack, 25, axis=0) # takes two minutes
+#         print(f"completed 25th percentile at {dt.datetime.now().time():%H:%M:%S}")
+#         
+#         print("started 75th percentile at {dt.datetime.now().time():%H:%M:%S}")
+#         index_p75 = np.nanpercentile(stack, 75, axis=0) # takes two minutes
+#         print(f"completed 75th percentile at {dt.datetime.now().time():%H:%M:%S}")
+# =============================================================================
         
         print(f"started mean at {dt.datetime.now().time():%H:%M:%S}")
         index_mean = np.nanmean(stack, axis=0) # takes under 1 second
         print(f"completed mean at {dt.datetime.now().time():%H:%M:%S}")
         
         stms[index_name] = {
-            "median": index_median, 
-            "p25": index_p25, 
-            "p75": index_p75, 
+# =============================================================================
+#             "median": index_median, 
+#             "p25": index_p25, 
+#             "p75": index_p75, 
+# =============================================================================
             "mean": index_mean
             }
     

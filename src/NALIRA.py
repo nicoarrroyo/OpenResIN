@@ -57,7 +57,8 @@ import pipeline_operations as operation
 import user_interfacing as ui_do
 import config_NALIRA as c
 
-ui_do.table_print(n_chunks=c.N_CHUNKS, high_res=c.HIGH_RES, resolution=c.RES, 
+ui_do.table_print(n_chunks=c.N_CHUNKS, n_images=c.N_IMAGES,
+                  high_res=c.HIGH_RES, 
                   cloud_masking=c.CLOUD_MASKING, 
                   known_feature_masking=c.KNOWN_FEATURE_MASKING, 
                   show_plots=c.SHOW_INDEX_PLOTS, save_images=c.SAVE_IMAGES, 

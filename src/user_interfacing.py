@@ -6,6 +6,7 @@ import tkinter as tk
 import numpy as np
 import os
 from collections import defaultdict
+import config_NALIRA as c
 
 def table_print(**kwargs):
     """
@@ -47,7 +48,8 @@ def list_folders(folders_path):
     This functions has a bit of a deceiving name because it does more than just 
     list the folders in a directory. It also finds all the folders in the 
     directory that are relevant to sentinel 2 satellite imagery, separates 
-    them by year, tile, and month, and WIP
+    them by year, tile, and month, handles the quantity of folders that need 
+    to be process, and WIP
 
     Parameters
     ----------
@@ -72,6 +74,16 @@ def list_folders(folders_path):
         print("found 0 items in searched directory")
         sys.exit(1)
     
+    if c.N_IMAGES < -1 or not isinstance(c.N_IMAGES, int):
+        print(f"WARNING: N_IMAGES has a bad value: {c.N_IMAGES}")
+        print("Check config_NALIRA file to fix")
+        sys.exit(1)
+    elif c.N_IMAGES == -1:
+        n_images = len(folders)
+    else:
+        n_images = c.N_IMAGES
+    folders = folders[:n_images]
+    
     for folder in folders:
         if len(folder) > 10 and ".SAFE" in folder[5:]:
             filtered_folders.append(folder)
@@ -88,12 +100,12 @@ def list_folders(folders_path):
             image_info[year].append((sentinel_name, tile_number_field, month))
     
     for year in sorted(image_info.keys()):
-        print(f"\n{year}")
+        print(f"{year}")
         possible_years.append(year)
         for satellite, tile, month in image_info[year]:
             possible_tiles.append(tile)
             possible_months.append(month)
-            print(f"satellite {satellite}, tile {tile}, month {month}")
+            print(f"satellite {satellite}, tile {tile}, month {month}\n")
     
     if len(set(possible_tiles)) != 1:
         print("WARNING: there is more than one type of tile in the data "
