@@ -91,7 +91,7 @@ def check_file_permission(file_name):
         try: # check if file is open
             with open(file_name, mode="a"):
                 break
-        except IOError:
+        except Exception:
             print("could not open file - clashing permissions or missing file")
             print("please close the responses file or create one")
             input("press enter to retry")

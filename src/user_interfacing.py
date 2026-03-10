@@ -6,6 +6,7 @@ import tkinter as tk
 import numpy as np
 import os
 from collections import defaultdict
+from itertools import groupby
 
 def table_print(**kwargs):
     """
@@ -41,6 +42,69 @@ def table_print(**kwargs):
     for key, value in kwargs.items():
         print(f"| {key.ljust(max_var_length)} | {str(value).ljust(max_value_length)} |")
     print(separator)
+
+def list_folders(folders_path):
+    """
+    This functions has a bit of a deceiving name because it does more than just 
+    list the folders in a directory. It also finds all the folders in the 
+    directory that are relevant to sentinel 2 satellite imagery, separates 
+    them by year, tile, and month, and 
+
+    Parameters
+    ----------
+    folders_path : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    filtered_folders : TYPE
+        DESCRIPTION.
+
+    """
+    folders = []
+    filtered_folders = []
+    possible_years = []
+    possible_tiles = []
+    possible_months = []
+    
+    folders = os.listdir(folders_path)
+    
+    if len(folders) == 0:
+        print("found 0 items in searched directory")
+        sys.exit(1)
+    
+    for folder in folders:
+        if len(folder) > 10 and ".SAFE" in folder[5:]:
+            filtered_folders.append(folder)
+    
+    image_info = defaultdict(list)
+    for folder in filtered_folders:
+        parts = folder.split("_")
+        if len(parts) == 7:
+            sentinel_name = parts[0]
+            datatake_start_sensing_time = parts[2]
+            tile_number_field = parts[5]
+            year = datatake_start_sensing_time[:4]
+            month = datatake_start_sensing_time[4:6]
+            image_info[year].append((sentinel_name, tile_number_field, month))
+    
+    for year in sorted(image_info.keys()):
+        print(f"\n{year}")
+        possible_years.append(year)
+        for satellite, tile, month in image_info[year]:
+            possible_tiles.append(tile)
+            possible_months.append(month)
+            print(f"satellite {satellite}, tile {tile}, month {month}")
+    
+    if len(set(possible_tiles)) != 1:
+        print("WARNING: there is more than one type of tile in the data "
+              "folder. This can cause problems with image compositing as the images "
+              "are unlikely to overlap perfectly. To fix this, it is "
+              "recommended to move all the unintended folders into a storage "
+              "folder away from the searched data directory.")
+        sys.exit(1)
+    
+    return filtered_folders
 
 def failure(failure, solution, error):
     print(f"FAILURE: {failure} due to {error}")
@@ -308,42 +372,3 @@ def prompt_roi(image_array, n):
     root.mainloop()
     rois_converted = np.array(rois) * len(image_array) / width
     return rois_converted
-
-def list_folders(folders_path):
-    folders = []
-    filtered_folders = []
-    possible_years = []
-    possible_tiles = []
-    possible_months = []
-    
-    folders = os.listdir(folders_path)
-    
-    if len(folders) == 0:
-        print("found 0 folders in searched directory")
-        sys.exit(1)
-    
-    for folder in folders:
-        if len(folder) > 10 and ".SAFE" in folder[5:]:
-            filtered_folders.append(folder)
-    folders = filtered_folders
-    
-    image_info = defaultdict(list)
-    for folder in folders:
-        parts = folder.split("_")
-        if len(parts) == 7:
-            sentinel_name = parts[0]
-            datatake_start_sensing_time = parts[2]
-            tile_number_field = parts[5]
-            year = datatake_start_sensing_time[:4]
-            month = datatake_start_sensing_time[4:6]
-            image_info[year].append((sentinel_name, tile_number_field, month))
-    
-    for year in sorted(image_info.keys()):
-        print(f"\n{year}")
-        possible_years.append(year)
-        for satellite, tile, month in image_info[year]:
-            possible_tiles.append(tile)
-            possible_months.append(month)
-            print(f"satellite {satellite}, tile {tile}, month {month}")
-    
-    return folders

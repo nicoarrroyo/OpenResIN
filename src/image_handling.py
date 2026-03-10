@@ -417,6 +417,7 @@ def get_ndwi_patch(data, chunk_n, coordinates, g_min, g_max):
     return cropped_data
 
 def get_rgb_data(data, chunk_n, coordinates, g_min, g_max):
+    # DEPRACATED / OUT OF USE
     iulx, iuly, ilrx, ilry = map(int, coordinates)
     iulx = max(0, iulx)
     iuly = max(0, iuly)

@@ -76,7 +76,8 @@ for folder in folders:
      prefix, 
      images_path, 
      tci_array, 
-     tci_60_array] = operation.one_create_image_arrays(
+     tci_60_array
+     ] = operation.one_create_image_arrays(
          folders_path, 
          folder, 
          tci_60_array # for checking if a tci has been opened yet
@@ -103,6 +104,7 @@ for folder in folders:
 
 # %% 5. Composite Images (and plot)
 ndwi_mean = operation.five_composite(index_arrays["ndwi"])
+
 if c.SHOW_INDEX_PLOTS:
     operation.fiveb_plot(ndwi_mean, folders_path)
 else:
@@ -110,12 +112,11 @@ else:
 
 # %% 6. Prepare Labelling Data
 if c.LABEL_DATA:
-    [
-     index_chunks, 
+    [index_chunks, 
      tci_chunks, 
      break_flag, 
      i, 
-     data_file, 
+     data_file_path, 
      data_correction, 
      invalid_rows, 
      lines, 
@@ -138,7 +139,7 @@ if c.LABEL_DATA:
          ndwi_mean, 
          tci_chunks, 
          tci_60_array, 
-         data_file, 
+         data_file_path, 
          data_correction, 
          invalid_rows, 
          lines, 
@@ -148,5 +149,9 @@ else:
     print("skipping data labelling")
 
 # %% 8. Save Labelling Results
-operation.eight_segment_data(data_file, index_chunks, labelling_path)
+operation.eight_segment_data(
+    data_file_path, 
+    index_chunks, 
+    labelling_path, 
+    prefix)
 

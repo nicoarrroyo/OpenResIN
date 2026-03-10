@@ -37,6 +37,7 @@ import config_NALIRA as c
 # %% 1. Creating image arrays (iterative)
 def one_create_image_arrays(folders_path, folder, tci_60_array):
     print(f"step 1 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    
     # 1.1 Establishing Paths
     """Most Sentinel 2 files that come packaged in a satellite image 
     folder follow naming conventions that use information contained in the 
@@ -133,7 +134,7 @@ def two_mask_known_feature(image_arrays, image_metadata):
     print(f"step 2 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("masking out known features")
     
-    masking_path = os.path.join(c.HOME_DIR, "data", "masks")
+    masking_path = os.path.join(c.DATA_DIR, "masks")
     
     rivers_data = os.path.join(
         masking_path, 
@@ -149,14 +150,14 @@ def two_mask_known_feature(image_arrays, image_metadata):
         )
     known_reservoirs_data = os.path.join(
         masking_path, 
-        "known reservoirs", 
-        "LRR _EW_202307_v1", 
+        "known-reservoirs", 
+        "LRR_EW_202307_v1", 
         "SHP", 
         "LRR_ENG_20230601_WGS84.shp" # WGS84 is more accurate than OSGB35
         )
     urban_areas_data = os.path.join( # REMEMBER TO CITE SOURCE FROM README
         masking_path, 
-        "urban areas", 
+        "urban-areas", 
         "CEH_GBLandCover_2024_10m", 
         "data", 
         "4dd9df19-8df5-41a0-9829-8f6114e28db1", 
@@ -327,23 +328,19 @@ def six_prepare_data(ndwi_mean, tci_array, folders, prefix):
         if data_folder_found:
             break
         
-        folder_path = os.path.join(c.HOME_DIR, "data", "sat-images", folder)
-        if os.path.exists(os.path.join(folder_path, "training_data")):
+        if os.path.exists(os.path.join(c.DATA_DIR, "training-data")):
             data_folder_found = True
-            labelling_path = os.path.join(folder_path, "training_data")
+            labelling_path = os.path.join(c.DATA_DIR, "training-data")
     
     if not data_folder_found:
-        labelling_path = os.path.join(folder_path, "training_data")
+        labelling_path = os.path.join(c.DATA_DIR, "training-data")
         os.makedirs(labelling_path, exist_ok=True)
-
-    lines = []
-    header = ("chunk,reservoirs,water-bodies,reservoir-"
-    "coordinates,,,,,water-body-coordinates\n")
-    data_file_prefix = f"{prefix.split('_')[0]}"
-    data_file_name = f"{data_file_prefix}-{c.DATA_FILE_SUFFIX}"
-    data_file = os.path.join(labelling_path, data_file_name)
-    data_do.blank_entry_check(file=data_file) # remove all blank entries
-
+    
+    data_file_name_prefix = f"{prefix.split('_')[0]}"
+    data_file_name = f"{data_file_name_prefix}-{c.DATA_FILE_NAME_SUFFIX}"
+    data_file_path = os.path.join(labelling_path, data_file_name)
+    data_do.blank_entry_check(file=data_file_path) # remove all blank entries
+    
     # 6.2.1 File validity check
     """This section is about checking that the contents of the file are sound. 
     This means checking that, for example, the file exists, or that the entry 
@@ -357,9 +354,12 @@ def six_prepare_data(ndwi_mean, tci_array, folders, prefix):
     overwritten at any point, again, unless the user is sure this is the 
     intended behaviour."""
     print("preparing file for labelling")
+    
+    header = ("chunk,reservoirs,water-bodies,reservoir-"
+    "coordinates,,,,,water-body-coordinates\n")
     while True:
-        # file will always exist due to blank_entry_check call
-        with open(data_file, "r") as file:
+        # file should always exist due to blank_entry_check call
+        with open(data_file_path, "r") as file:
             lines = file.readlines()
         try:
             # Validate file data
@@ -381,7 +381,7 @@ def six_prepare_data(ndwi_mean, tci_array, folders, prefix):
                 sys.exit()
             if ans.lower() == 'new':
                 print("creating new file")
-                with open(data_file, "w") as file:
+                with open(data_file_path, "w") as file:
                     file.write(header)
                     file.write("0, 1, 0\n") # dummy file to start up
                 continue
@@ -404,7 +404,7 @@ def six_prepare_data(ndwi_mean, tci_array, folders, prefix):
     invalid_rows = []
     data_correction = False
 
-    with open(data_file, "r") as file:
+    with open(data_file_path, "r") as file:
         lines = file.readlines() # reread lines in case of changes
         globals()["lines"] = lines
     for j in range(1, len(lines)): # starting from the "headers" line
@@ -442,11 +442,12 @@ def six_prepare_data(ndwi_mean, tci_array, folders, prefix):
                "incomplete, missing, or incorrect coordinate data")
         i = invalid_rows[0]
     print(f"step 6 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
-    return [index_chunks, tci_chunks, break_flag, i, data_file, data_correction, 
+    return [index_chunks, tci_chunks, break_flag, i, data_file_path, data_correction, 
             invalid_rows, lines, last_chunk, labelling_path]
+
 # %% 7. Data labelling
 def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array, 
-                     data_file, data_correction, invalid_rows, 
+                     data_file_path, data_correction, invalid_rows, 
                      lines, last_chunk):
     # ### 7. Data Labelling
     print(f"step 7 beginning at {dt.datetime.now().time():%H:%M:%S}")
@@ -469,7 +470,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
         print(f"MAX NDWI: {max_index[1]}")
         
         # #### 7.2 User Labelling
-        data_do.blank_entry_check(file=data_file)
+        data_do.blank_entry_check(file=data_file_path)
         if data_correction:
             print((
                 "this chunk "
@@ -483,7 +484,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
         n_bodies = ""
         entry_list = []
         while True:
-            data_do.blank_entry_check(file=data_file)
+            data_do.blank_entry_check(file=data_file_path)
             back_flag = False
             try:
                 # #### 7.2.1 Regular integer response
@@ -543,12 +544,12 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                     except:
                         n_backs = 1
                     i -= n_backs
-                    ui_do.check_file_permission(file_name=data_file)
-                    with open(data_file, mode="r") as re: # read
+                    ui_do.check_file_permission(file_name=data_file_path)
+                    with open(data_file_path, mode="r") as re: # read
                         rows = list(csv.reader(re))
                     for j in range(n_backs):
                         rows.pop() # remove the last "n_backs" rows
-                    with open(data_file, mode="w") as wr: # write
+                    with open(data_file_path, mode="w") as wr: # write
                         data_do.rewrite(write_file=wr, rows=rows)
                     break
                 # ##### 7.2.4 Non-integer response: error
@@ -564,7 +565,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
         if break_flag:
             break
         if not break_flag and not back_flag:
-            data_do.check_file_permission(file_name=data_file)
+            data_do.check_file_permission(file_name=data_file_path)
             csv_entry = ""
             first_csv_entry = True
             for entry in entry_list:
@@ -575,7 +576,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                 first_csv_entry = False
             if data_correction: # add coordinates to data
                 lines[i] = f"{csv_entry}\n"
-                with open(data_file, mode="w") as wr: # write
+                with open(data_file_path, mode="w") as wr: # write
                     for j in range(len(lines)):
                         current_entry = lines[j]
                         wr.write(f"{current_entry}")
@@ -586,13 +587,13 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                 else:
                     i = invalid_rows[invalid_rows_index]
             else: # convert entry_list to a string for csv
-                with open(data_file, mode="a") as ap: # append
+                with open(data_file_path, mode="a") as ap: # append
                     ap.write(f"\n{csv_entry}")
     print(f"step 7 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return
 
 # %% 8. Data segmentation
-def eight_segment_data(data_file, index_chunks, labelling_path, prefix):
+def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
     # #### 8.1 Extract Reservoir and Water Body Coordinates
     """Reads the labelled CSV file and builds per-class coordinate lists.
     Each entry in a coords list is a tuple of (line_index, coordinates),
@@ -614,7 +615,7 @@ def eight_segment_data(data_file, index_chunks, labelling_path, prefix):
     # placeholder coord – centred crop used for unlabelled land / sea chunks
     none_coord = "[50.0 50.0 55.0 55.0]"
     
-    with open(data_file, "r") as file:
+    with open(data_file_path, "r") as file:
         lines = file.readlines()
 
     for i in range(1, len(lines)):
