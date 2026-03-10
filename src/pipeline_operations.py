@@ -103,9 +103,9 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
     image_arrays = image_do.image_to_array(file_paths)
     
     # 1.2.2 Opening and Converting True Colour Images
-    if not tci_60_array:
-        tci_array = []
-        tci_60_array = []
+    if not tci_60_array.any():
+        tci_array = np.empty([1,1])
+        tci_60_array = np.empty([1,1])
     if c.LABEL_DATA:
         """Load the TCI file at selected resolution, convert to array, resize for 
         GUI labelling."""
@@ -282,18 +282,29 @@ def four_compute_indices(image_arrays):
     return {"ndwi":ndwi, "ndvi":ndvi}
 
 # %% 5. Image compositing (and plotting)
-def five_composite(ndwi_arrays_list):
+def five_composite(index_arrays):
     print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("compositing all images together")
-    ndwi_stack = np.stack(ndwi_arrays_list)
-    ndwi_mean = np.nanmean(ndwi_stack, axis=0)
-    #ndwi_sd = np.nanstd(ndwi_stack, axis=0)
-
-    # 5.2 Compositing Scenes Together
-    # ndwi_composite = np.stack([ndwi_mean, ndwi_sd], axis=-1)
+    stms = {}
+    
+    for index_name, arrays_list in index_arrays.items():
+        shapes = [a.shape for a in arrays_list]
+        if len(set(shapes)) > 1:
+            print(f"WARNING: shape mismatch in {index_name} arrays: {shapes}")
+            print("skipping this index")
+            continue
+    
+    stack = np.stack(arrays_list)
+    
+    stms[index_name] = {
+        "median": np.nanpercentile(stack, 50, axis=0), 
+        "p25": np.nanpercentile(stack, 25, axis=0), 
+        "p75": np.nanpercentile(stack, 75, axis=0), 
+        "mean": np.nanmean(stack, axis=0)
+        }
     
     print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
-    return ndwi_mean#, ndwi_sd, ndwi_composite
+    return stms
 
 def fiveb_plot(ndwi_mean, folder_path):
     if c.SAVE_IMAGES:
@@ -728,7 +739,7 @@ def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
                 print(f"skipping empty patch (chunk {chunk_n}, "
                       f"class '{class_name}')")
                 continue
-
+            
             # normalise to uint8 [0, 255]
             patch_clipped = np.clip(ndwi_patch, global_min, global_max)
             if global_max != global_min:

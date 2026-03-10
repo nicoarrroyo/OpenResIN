@@ -52,6 +52,7 @@ Outputs:
 # %% Start
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__))) # fix working directory
+import numpy as np
 import pipeline_operations as operation
 import user_interfacing as ui_do
 import config_NALIRA as c
@@ -63,14 +64,19 @@ ui_do.table_print(n_chunks=c.N_CHUNKS, high_res=c.HIGH_RES, resolution=c.RES,
                   labelling=c.LABEL_DATA)
 
 index_arrays = {"ndwi": [], "ndvi": []}
-tci_array = []
-tci_60_array = []
+tci_array = np.empty([1,1]); tci_60_array = np.empty([1,1])
 
 folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
 folders = ui_do.list_folders(folders_path)
 
     # %% 1. Create Image Arrays
-for folder in folders:
+for folder_num, folder in enumerate(folders):
+    print("\n===============")
+    print(f"|| IMG {folder_num+1} / {len(folders)} ||")
+    print("===============")
+    print("----------")
+    print("| STEP 1 |")
+    print("----------")
     [image_arrays, 
      image_metadata, 
      prefix, 
@@ -84,6 +90,9 @@ for folder in folders:
          )
     
     # %% 2. Mask Known Features
+    print("----------")
+    print("| STEP 2 |")
+    print("----------")
     if c.KNOWN_FEATURE_MASKING:
         image_arrays = operation.two_mask_known_feature(
             image_arrays, 
@@ -92,18 +101,28 @@ for folder in folders:
         print("skipping known feature masking")
     
     # %% 3. Mask Clouds (Omnicloudmask)
+    print("----------")
+    print("| STEP 3 |")
+    print("----------")
     if c.CLOUD_MASKING:
         image_arrays = operation.three_mask_clouds(image_arrays)
     else:
         print("skipping cloud masking")
     
     # %% 4. Calculate Spectral Indices
+    print("----------")
+    print("| STEP 4 |")
+    print("----------")
     indices = operation.four_compute_indices(image_arrays)
     for key in index_arrays:
         index_arrays[key].append(indices[key])
 
 # %% 5. Composite Images (and plot)
-ndwi_mean = operation.five_composite(index_arrays["ndwi"])
+print("----------")
+print("| STEP 5 |")
+print("----------")
+stms = operation.five_composite(index_arrays["ndwi"])
+ndwi_mean = stms["ndwi"]["median"] # temporary. will replace with full stm
 
 if c.SHOW_INDEX_PLOTS:
     operation.fiveb_plot(ndwi_mean, folders_path)
@@ -111,6 +130,9 @@ else:
     print("skipping water index image display")
 
 # %% 6. Prepare Labelling Data
+print("----------")
+print("| STEP 6 |")
+print("----------")
 if c.LABEL_DATA:
     [index_chunks, 
      tci_chunks, 
@@ -132,6 +154,9 @@ else:
     print("skipping data preparation")
 
 # %% 7. Label Data
+print("----------")
+print("| STEP 7 |")
+print("----------")
 if c.LABEL_DATA:
     operation.seven_label_data(
          i, 
@@ -149,6 +174,9 @@ else:
     print("skipping data labelling")
 
 # %% 8. Save Labelling Results
+print("----------")
+print("| STEP 8 |")
+print("----------")
 operation.eight_segment_data(
     data_file_path, 
     index_chunks, 
