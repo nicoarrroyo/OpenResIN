@@ -6,7 +6,6 @@ import tkinter as tk
 import numpy as np
 import os
 from collections import defaultdict
-from itertools import groupby
 
 def table_print(**kwargs):
     """
@@ -48,7 +47,7 @@ def list_folders(folders_path):
     This functions has a bit of a deceiving name because it does more than just 
     list the folders in a directory. It also finds all the folders in the 
     directory that are relevant to sentinel 2 satellite imagery, separates 
-    them by year, tile, and month, and 
+    them by year, tile, and month, and WIP
 
     Parameters
     ----------
