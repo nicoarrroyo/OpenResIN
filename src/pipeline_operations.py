@@ -35,7 +35,8 @@ import user_interfacing as ui_do
 import config_NALIRA as c
 
 # %% 1. Creating image arrays (iterative)
-def one_create_image_arrays(folders_path, folder):
+def one_create_image_arrays(folders_path, folder, tci_60_array):
+    print(f"step 1 beginning at {dt.datetime.now().time():%H:%M:%S}")
     # 1.1 Establishing Paths
     """Most Sentinel 2 files that come packaged in a satellite image 
     folder follow naming conventions that use information contained in the 
@@ -55,7 +56,7 @@ def one_create_image_arrays(folders_path, folder):
     subdirs = [d for d in os.listdir(images_path) 
                if os.path.isdir(os.path.join(images_path, d))]
     if len(subdirs) == 1:
-        images_path = os.path.join(images_path, subdirs[0])
+        images_path = os.path.join(images_path, subdirs[0], "IMG_DATA")
     else:
         print("Too many subdirectories in 'GRANULE':", len(subdirs))
         ui_do.confirm_continue_or_exit()
@@ -80,7 +81,6 @@ def one_create_image_arrays(folders_path, folder):
         file_paths.append(
             os.path.join(
                 images_path, 
-                "IMG_DATA", 
                 f"R{c.RES}", 
                 f"{prefix}_B{band}_{c.RES}.jp2"
                 )
@@ -102,29 +102,35 @@ def one_create_image_arrays(folders_path, folder):
     image_arrays = image_do.image_to_array(file_paths)
     
     # 1.2.2 Opening and Converting True Colour Images
-    tci_array = []
-    tci_60_array = []
+    if not tci_60_array:
+        tci_array = []
+        tci_60_array = []
     if c.LABEL_DATA:
         """Load the TCI file at selected resolution, convert to array, resize for 
         GUI labelling."""
         print(f"opening {c.RES} resolution true colour image")
         
-        tci_path = os.path.join(images_path, "IMG_DATA", f"R{c.RES}")
+        tci_path = os.path.join(images_path, f"R{c.RES}")
         tci_file_name = prefix + f"_TCI_{c.RES}.jp2"
         tci_array = image_do.image_to_array(os.path.join(tci_path, tci_file_name))
         
-        tci_60_path = os.path.join(folder_path, "GRANULE", subdirs[0], 
-                                   "IMG_DATA", "R60m")
+        tci_60_path = os.path.join(images_path, "R60m")
         tci_60_file_name = prefix + "_TCI_60m.jp2"
         with Image.open(os.path.join(tci_60_path, tci_60_file_name)) as img:
             size = (img.width//10, img.height//10)
             tci_60_array = np.array(img.resize(size))
     
-    print(f"step 1 complete! finished at {dt.datetime.now().time()}")
-    return image_arrays, image_metadata, prefix, images_path, tci_array, tci_60_array
+    print(f"step 1 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
+    return [image_arrays, 
+            image_metadata, 
+            prefix, 
+            images_path, 
+            tci_array, 
+            tci_60_array]
 
 # %% 2. Masking out known features (iterative)
 def two_mask_known_feature(image_arrays, image_metadata):
+    print(f"step 2 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("masking out known features")
     
     masking_path = os.path.join(c.HOME_DIR, "data", "masks")
@@ -204,7 +210,7 @@ def two_mask_known_feature(image_arrays, image_metadata):
             print("TRYING: skip step. User must source the file.")
             ui_do.confirm_continue_or_exit()
     
-    print(f"step 2 complete! finished at {dt.datetime.now().time()}")
+    print(f"step 2 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return image_arrays
 
 # %% 3. Masking out clouds (OmniCloudMask) (iterative)
@@ -214,6 +220,7 @@ def three_mask_clouds(image_arrays):
         "cloud masking may not be accurate"))
         ui_do.confirm_continue_or_exit()
     
+    print(f"step 3 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("masking clouds")
     input_array = np.stack((
         image_arrays[2], # red
@@ -242,7 +249,7 @@ def three_mask_clouds(image_arrays):
         image_arrays[i] = image_arrays[i].astype(np.float32)
         image_arrays[i][combined_mask] = np.nan
     
-    print(f"step 3 complete! finished at {dt.datetime.now().time()}")
+    print(f"step 3 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return image_arrays
 
 # %% 4. Compute water indices (iterative)
@@ -254,12 +261,12 @@ def four_compute_indices(image_arrays):
     green, nir, red = image_arrays
     
     # 4.2 Calculating Indices
+    print(f"step 4 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("populating index arrays")
     np.seterr(divide="ignore", invalid="ignore")
-    ndwi = (green - nir) / (green + nir)
     
-    # ndvi = ((nir - red) / (nir + red))
-    # ndvi_arrays_list.append(ndvi)
+    ndwi = (green - nir) / (green + nir)
+    ndvi = ((nir - red) / (nir + red))
     
     # gain factor g, aerosol resistance coefficient c1 & c2
     # evi_num = g * (nir - red)
@@ -270,11 +277,12 @@ def four_compute_indices(image_arrays):
     # evi2 = 2.4 * (nir - red) / (nir + red + 1) # 2-band evi can be useful
     # evi2_arrays_list.append(evi2)
     
-    print(f"step 4 complete! finished at {dt.datetime.now().time()}")
-    return ndwi
+    print(f"step 4 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
+    return {"ndwi":ndwi, "ndvi":ndvi}
 
 # %% 5. Image compositing (and plotting)
 def five_composite(ndwi_arrays_list):
+    print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("compositing all images together")
     ndwi_stack = np.stack(ndwi_arrays_list)
     ndwi_mean = np.nanmean(ndwi_stack, axis=0)
@@ -283,55 +291,57 @@ def five_composite(ndwi_arrays_list):
     # 5.2 Compositing Scenes Together
     # ndwi_composite = np.stack([ndwi_mean, ndwi_sd], axis=-1)
     
-    print(f"step 5 complete! finished at {dt.datetime.now().time()}")
+    print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return ndwi_mean#, ndwi_sd, ndwi_composite
 
 def fiveb_plot(ndwi_mean, folder_path):
     if c.SAVE_IMAGES:
+        print(f"step 5b beginning at {dt.datetime.now().time():%H:%M:%S}")
         print("saving and displaying water index images")
     else:
         print("displaying water index images")
     image_do.plot_indices(ndwi_mean, c.PLOT_SIZE, c.DPI, c.SAVE_IMAGES, 
                           folder_path, c.RES)
-    print(f"step 5b (plotting) complete! finished at {dt.datetime.now().time()}")
+    print(f"step 5b complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return
 
 # %% 6. Data preparation
-def six_prepare_data(ndwi_mean, tci_array, folders):
+def six_prepare_data(ndwi_mean, tci_array, folders, prefix):
     # 6.1 Creating Chunks from Satellite Imagery
     """Split the NDWI array into N_CHUNKS equal segments for batch ROI 
     labelling and parallel processing."""
+    print(f"step 6 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
     index_chunks = misc.split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
     if c.LABEL_DATA:
         tci_chunks = misc.split_array(array=tci_array, n_chunks=c.N_CHUNKS)
-
+    
     # 6.2 Preparing File for Labelling
     """Initialise or validate the CSV file by enforcing a header, removing 
     blank lines, and ensuring sequential chunk indices"""
     break_flag = False
-
+    
     # check for a responses folder
     data_folder_found = False
     for folder in folders:
         if data_folder_found:
             break
         
-        folder_path = os.path.join(c.HOME_DIR, "data", "sentinel_2", folder)
-        if os.path.exists(os.path.join(folder_path, "training data")):
+        folder_path = os.path.join(c.HOME_DIR, "data", "sat-images", folder)
+        if os.path.exists(os.path.join(folder_path, "training_data")):
             data_folder_found = True
-            labelling_path = os.path.join(folder_path, "training data")
-
+            labelling_path = os.path.join(folder_path, "training_data")
+    
     if not data_folder_found:
-        labelling_path = os.path.join(folder_path, "training data")
-        data_do.change_to_folder(labelling_path) # create the folder
-        os.chdir(c.HOME_DIR) # always go back to initial home folder
-        # THIS IS BAD!! PLEASE FIND A WAY TO CHANGE THIS!!
+        labelling_path = os.path.join(folder_path, "training_data")
+        os.makedirs(labelling_path, exist_ok=True)
 
     lines = []
     header = ("chunk,reservoirs,water-bodies,reservoir-"
     "coordinates,,,,,water-body-coordinates\n")
-    data_file = os.path.join(labelling_path, c.DATA_FILE_NAME)
+    data_file_prefix = f"{prefix.split('_')[0]}"
+    data_file_name = f"{data_file_prefix}-{c.DATA_FILE_SUFFIX}"
+    data_file = os.path.join(labelling_path, data_file_name)
     data_do.blank_entry_check(file=data_file) # remove all blank entries
 
     # 6.2.1 File validity check
@@ -431,7 +441,7 @@ def six_prepare_data(ndwi_mean, tci_array, folders):
         print(f"found {len(invalid_rows)} chunks containing "
                "incomplete, missing, or incorrect coordinate data")
         i = invalid_rows[0]
-    print(f"step 6 complete! finished at {dt.datetime.now().time()}")
+    print(f"step 6 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return [index_chunks, tci_chunks, break_flag, i, data_file, data_correction, 
             invalid_rows, lines, last_chunk, labelling_path]
 # %% 7. Data labelling
@@ -439,6 +449,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                      data_file, data_correction, invalid_rows, 
                      lines, last_chunk):
     # ### 7. Data Labelling
+    print(f"step 7 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("data labelling start")
     break_flag = False
     
@@ -577,11 +588,11 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
             else: # convert entry_list to a string for csv
                 with open(data_file, mode="a") as ap: # append
                     ap.write(f"\n{csv_entry}")
-    print(f"step 7 complete! finished at {dt.datetime.now().time()}")
+    print(f"step 7 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return
 
 # %% 8. Data segmentation
-def eight_segment_data(data_file, index_chunks, labelling_path):
+def eight_segment_data(data_file, index_chunks, labelling_path, prefix):
     # #### 8.1 Extract Reservoir and Water Body Coordinates
     """Reads the labelled CSV file and builds per-class coordinate lists.
     Each entry in a coords list is a tuple of (line_index, coordinates),
@@ -592,23 +603,25 @@ def eight_segment_data(data_file, index_chunks, labelling_path):
         print("high resolution setting must be activated for data segmentation")
         print("exiting program")
         return
+    print(f"step 8 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("data segmentation start")
 
-    res_rows   = [];  res_coords  = []
-    body_rows  = [];  body_coords = []
-    land_rows  = [];  land_coords = []
-    sea_rows   = [];  sea_coords  = []
-
+    res_rows  = []; res_coords  = []
+    body_rows = []; body_coords = []
+    land_rows = []; land_coords = []
+    sea_rows  = []; sea_coords  = []
+    
     # placeholder coord – centred crop used for unlabelled land / sea chunks
     none_coord = "[50.0 50.0 55.0 55.0]"
-
+    
     with open(data_file, "r") as file:
         lines = file.readlines()
 
     for i in range(1, len(lines)):
         lines[i] = lines[i].split(",")
-
-        if int(lines[i][1]) > 0:   # ---- reservoirs ----
+        
+        # ---- reservoirs ----
+        if int(lines[i][1]) > 0:
             res_rows.append(lines[i])
             n = int(res_rows[-1][1])
             col_range = range(3, 3 + n) if n > 1 else [3]
@@ -616,8 +629,9 @@ def eight_segment_data(data_file, index_chunks, labelling_path):
                 res_coords.append(
                     (i, data_do.extract_coords(res_rows[-1][j],
                                                create_box_flag=True)))
-
-        if int(lines[i][2]) > 0:   # ---- water bodies / sea ----
+        
+        # ---- water bodies / sea ----
+        if int(lines[i][2]) > 0:
             body_rows.append(lines[i])
             first_coords = data_do.extract_coords(body_rows[-1][8],
                                                   create_box_flag=False)
@@ -634,8 +648,9 @@ def eight_segment_data(data_file, index_chunks, labelling_path):
                 sea_coords.append(
                     (i, data_do.extract_coords(none_coord,
                                                create_box_flag=True)))
-
-        if int(lines[i][1]) == 0 and int(lines[i][2]) == 0:   # ---- land ----
+        
+        # ---- land ----
+        if int(lines[i][1]) == 0 and int(lines[i][2]) == 0:
             land_rows.append(lines[i])
             land_coords.append(
                 (i, data_do.extract_coords(none_coord,
@@ -657,12 +672,9 @@ def eight_segment_data(data_file, index_chunks, labelling_path):
     # #### 8.3 Save PNG Training Images per Class
     """One sub-folder per class is created inside labelling_path. Each
     extracted NDWI patch is normalised to [0, 255] and saved as an 8-bit
-    greyscale PNG.
+    greyscale PNG."""
 
-    To add a new class, append a (coords_list, "class-name") tuple to
-    all_coords below – no other changes are needed."""
-
-    # --- class definitions (extend this list to add new classes) ---
+    # --- class definitions ---
     all_coords = [
         (res_coords,  "reservoirs"),
         (body_coords, "water-bodies"),
@@ -698,7 +710,7 @@ def eight_segment_data(data_file, index_chunks, labelling_path):
 
             # bounds-check against valid_chunks length
             if chunk_n < 0 or chunk_n >= len(valid_chunks):
-                print(f"  skipping out-of-range chunk {chunk_n} "
+                print(f"skipping out-of-range chunk {chunk_n} "
                       f"for class '{class_name}'")
                 continue
 
@@ -712,7 +724,7 @@ def eight_segment_data(data_file, index_chunks, labelling_path):
             )
 
             if ndwi_patch is None or ndwi_patch.size == 0:
-                print(f"  skipping empty patch (chunk {chunk_n}, "
+                print(f"skipping empty patch (chunk {chunk_n}, "
                       f"class '{class_name}')")
                 continue
 
@@ -729,19 +741,21 @@ def eight_segment_data(data_file, index_chunks, labelling_path):
             # distinguishable from true zero-valued pixels
             nan_mask = np.isnan(ndwi_patch)
             patch_uint8[nan_mask] = 128
-
-            img = Image.fromarray(patch_uint8, mode="L")  # greyscale PNG
-            image_index = start_index + saved
-            file_name = f"image_{image_index:04d}.png"
+            
+            img = Image.fromarray(patch_uint8, mode="L") # greyscale PNG
+            img_tile = f"{prefix.split('_')[0]}_{prefix.split('_')[1].split('T')[0]}"
+            img_index = start_index + saved
+            file_name = f"{img_tile}-{img_index:04d}.png"
             img.save(os.path.join(class_dir, file_name))
             saved += 1
 
         saved_counts[class_name] = saved
-        print(f"  saved {saved} images to "
+        print(f"saved {saved} images to "
               f"{os.path.relpath(class_dir, labelling_path)}/")
 
     total = sum(saved_counts.values())
     print(f"saved {total} PNG training images across "
           f"{len(all_coords)} classes")
-    print(f"step 8 complete! finished at {dt.datetime.now().time()}")
+    
+    print(f"step 8 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return
