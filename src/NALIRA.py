@@ -62,11 +62,11 @@ ui_do.table_print(n_chunks=c.N_CHUNKS, high_res=c.HIGH_RES, resolution=c.RES,
                   show_plots=c.SHOW_INDEX_PLOTS, save_images=c.SAVE_IMAGES, 
                   labelling=c.LABEL_DATA)
 
-ndwi_arrays_list = []
+index_arrays = {"ndwi": [], "ndvi": []}
 tci_array = []
 tci_60_array = []
 
-folders_path = os.path.join(c.HOME_DIR, "data", "sentinel_2")
+folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
 folders = ui_do.list_folders(folders_path)
 
     # %% 1. Create Image Arrays
@@ -76,11 +76,17 @@ for folder in folders:
      prefix, 
      images_path, 
      tci_array, 
-     tci_60_array] = operation.one_create_image_arrays(folders_path, folder)
+     tci_60_array] = operation.one_create_image_arrays(
+         folders_path, 
+         folder, 
+         tci_60_array # for checking if a tci has been opened yet
+         )
     
     # %% 2. Mask Known Features
     if c.KNOWN_FEATURE_MASKING:
-        image_arrays = operation.two_mask_known_feature(image_arrays, image_metadata)
+        image_arrays = operation.two_mask_known_feature(
+            image_arrays, 
+            image_metadata)
     else:
         print("skipping known feature masking")
     
@@ -91,11 +97,12 @@ for folder in folders:
         print("skipping cloud masking")
     
     # %% 4. Calculate Spectral Indices
-    ndwi = operation.four_compute_indices(image_arrays)
-    ndwi_arrays_list.append(ndwi)
+    indices = operation.four_compute_indices(image_arrays)
+    for key in index_arrays:
+        index_arrays[key].append(indices[key])
 
 # %% 5. Composite Images (and plot)
-ndwi_mean = operation.five_composite(ndwi_arrays_list)
+ndwi_mean = operation.five_composite(index_arrays["ndwi"])
 if c.SHOW_INDEX_PLOTS:
     operation.fiveb_plot(ndwi_mean, folders_path)
 else:
@@ -117,7 +124,8 @@ if c.LABEL_DATA:
      ] = operation.six_prepare_data(
          ndwi_mean, 
          tci_array, 
-         folders
+         folders, 
+         prefix
          )
 else:
     print("skipping data preparation")
