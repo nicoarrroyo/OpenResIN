@@ -213,7 +213,7 @@ def mask_clouds(path, high_res, image_arrays):
     
     return image_arrays
 
-def plot_indices(data, size, dpi, save_image, folder_path, res):
+def plot_indices(data, size, save_image, folder_path, res):
     """ OUT OF DATE
     Take a list of indices and plot them for the user's viewing pleasure. 
     Other than being nice pictures to look at, there isn't that much use to 
@@ -228,9 +228,6 @@ def plot_indices(data, size, dpi, save_image, folder_path, res):
         The satellite number to be used as a part of the plot and file titles.
     size : tuple
         The required size of the image plots.
-    dpi : int
-        Dots-per-inch to which the image must be plotted. A higher value is 
-        more intensive but provides clearer images. 
     save_image : bool
         Boolean variable to check if the user wants the image saved.
     res : string
@@ -243,7 +240,7 @@ def plot_indices(data, size, dpi, save_image, folder_path, res):
     
     """
     plt.figure(figsize=(size))
-    plt.title(f"Sentinel 2 NDWI DPI{dpi} R{res}", fontsize=8)
+    plt.title(f"Sentinel 2 NDWI R{res}", fontsize=8)
     
     ax = plt.gca()
     plt.imshow(data)
@@ -255,7 +252,7 @@ def plot_indices(data, size, dpi, save_image, folder_path, res):
     
     if save_image:
         print("saving NDWI image", end="... ")
-        plot_name = f"S2_NDWI_DPI{dpi}_R{res}.png"
+        plot_name = f"S2_NDWI_R{res}.png"
         
         # check for file name already existing and increment file name
         base_name, extension = os.path.splitext(plot_name)
@@ -265,15 +262,15 @@ def plot_indices(data, size, dpi, save_image, folder_path, res):
             counter += 1
         
         plt.savefig(os.path.join(folder_path, plot_name), 
-                    dpi=dpi, bbox_inches="tight")
+                    dpi=3000, bbox_inches="tight")
         print(f"complete! saved as {plot_name}")
     
     print("displaying NDWI image", end="... ")
     plt.show()
     print("NDWI image display complete!")
 
-def plot_chunks(ndwi, index_chunks, plot_size_chunks, i, title_size, 
-                label_size, tci_chunks, tci_60_array):
+def plot_chunks(ndwi, index_chunks, plot_size_chunks, i, 
+                tci_chunks, tci_60_array):
     """ OUT OF DATE
     Plots image chunks of calculated indices (NDWI and MNDWI) and True Color 
     Images (TCI).
@@ -300,10 +297,6 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i, title_size,
         The size of the plot figure (width, height) for the subplots.
     i : int
         The index of the specific chunk to be plotted.
-    title_size : int
-        The size of the title in each plot.
-    label_size : int
-        The size of the labels (i.e. the axes labels) in each plot.
     tci_chunks : numpy.ndarray
         A 3D numpy array representing the True Color Image (TCI) chunks. The 
         first dimension corresponds to thechunk index, and the last two 
@@ -324,29 +317,33 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i, title_size,
                                  vmax=np.nanmax(ndwi)*0.5)
     base_ndwi = colors.Normalize(vmin=np.nanmin(ndwi), 
                                  vmax=np.nanmax(ndwi))
+    title_size = 5
     
     fig, axes = plt.subplots(2, 2, figsize=plot_size_chunks)
     # plot 1, top left: NDWI chunk (full resolution)
     axes[0][0].imshow(index_chunks[i], norm=norm_ndwi)
     axes[0][0].set_title(f"{index_labels[0]} Chunk {i}", 
                          fontsize=title_size)
-    axes[0][0].tick_params(axis="both", labelsize=label_size)
+    #axes[0][0].tick_params(axis="both", labelsize=label_size)
+    axes[0][0].axis("off")
     
     # plot 2, top right: MNDWI chunk (merged resolution)
     axes[0][1].imshow(index_chunks[i], norm=base_ndwi)
     axes[0][1].set_title(f"{index_labels[1]} Chunk {i}", 
                          fontsize=title_size)
-    axes[0][1].tick_params(axis="both", labelsize=label_size)
+    #axes[0][1].tick_params(axis="both", labelsize=label_size)
+    axes[0][1].axis("off")
     
     # plot 3, bottom left: TCI chunk (full resolution)
     axes[1][0].imshow(tci_chunks[i])
     axes[1][0].set_title(f"TCI Chunk {i}", fontsize=title_size)
-    axes[1][0].tick_params(axis="both", labelsize=label_size)
+    #axes[1][0].tick_params(axis="both", labelsize=label_size)
+    axes[1][0].axis("off")
     
     # plot 4, bottom right: tracker TCI (60m resolution)
     axes[1][1].imshow(tci_60_array)
     axes[1][1].set_title("Tracker TCI", fontsize=title_size)
-    axes[1][1].axis("on")
+    axes[1][1].axis("off")
     
     # calculate chunk geometry
     chunks_per_side = int(np.sqrt(len(tci_chunks)))
@@ -354,7 +351,7 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i, title_size,
     chunk_row = i // chunks_per_side
     axes[1][1].text(0.5, 0.95, f"COL {chunk_col} ROW {chunk_row}", 
                     transform=axes[1][1].transAxes, ha="center", 
-                    va="center", fontsize=label_size+1, color="yellow")
+                    va="center", fontsize=title_size-1, color="yellow")
     
     # calculate dimensions in the 60m array
     side_length = tci_60_array.shape[0] # assuming square image
@@ -365,11 +362,13 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i, title_size,
     # axes on TCI "tracker" image are "number of chunks"
     axes[1][1].set_xticks(np.linspace(0, side_length, 8))
     axes[1][1].set_yticks(np.linspace(0, side_length, 8))
-    axes_tick_labels = np.linspace(0, chunks_per_side, 8).astype(int)
-    axes[1][1].set_xticklabels(axes_tick_labels, fontsize=label_size)
-    axes[1][1].set_yticklabels(axes_tick_labels, fontsize=label_size)
-    axes[1][1].set_xlabel("Chunk Column", fontsize=label_size+1)
-    axes[1][1].set_ylabel("Chunk Row", fontsize=label_size+1)
+# =============================================================================
+#     axes_tick_labels = np.linspace(0, chunks_per_side, 8).astype(int)
+#     axes[1][1].set_xticklabels(axes_tick_labels, fontsize=label_size)
+#     axes[1][1].set_yticklabels(axes_tick_labels, fontsize=label_size)
+# =============================================================================
+    axes[1][1].set_xlabel("Chunk Column", fontsize=title_size-1)
+    axes[1][1].set_ylabel("Chunk Row", fontsize=title_size-1)
     
     # draw a red square around the current chunk
     tci_tracker_square = plt.Rectangle((chunk_ulx, chunk_uly), 
@@ -378,7 +377,7 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i, title_size,
                                    facecolor=None)
     axes[1][1].add_patch(tci_tracker_square)
     
-    plt.tight_layout()
+    #plt.tight_layout()
     plt.show()
 
 def get_ndwi_patch(data, chunk_n, coordinates, g_min, g_max):
