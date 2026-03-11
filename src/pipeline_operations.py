@@ -295,30 +295,18 @@ def five_composite(index_arrays):
             print("skipping this index")
             continue
         
-        print(f"stack start {dt.datetime.now().time():%H:%M:%S}")
         stack = np.stack(arrays_list)
-        print(f"stack finish {dt.datetime.now().time():%H:%M:%S}")
         
-        print(f"q start {dt.datetime.now().time():%H:%M:%S}")
-        q = np.array([25., 50., 75.], dtype=np.float32)
-        print(f"q finish {dt.datetime.now().time():%H:%M:%S}")
+        q = np.array([0., 25., 50., 75.], dtype=np.float32)
         
-        print(f"p25, median, p75 start {dt.datetime.now().time():%H:%M:%S}")
-        p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
-        print(f"p25, median, p75 finish {dt.datetime.now().time():%H:%M:%S}")
+        mean, p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
         
-        print(f"mean start {dt.datetime.now().time():%H:%M:%S}")
-        mean = np.nanpercentile(stack, 0, axis=0)
-        print(f"mean finish {dt.datetime.now().time():%H:%M:%S}")
-        
-        print(f"stms finish {dt.datetime.now().time():%H:%M:%S}")
         stms[index_name] = {
             "p25": p25, 
             "median": median, 
             "p75": p75, 
             "mean": mean
             }
-        print(f"stms {dt.datetime.now().time():%H:%M:%S}")
     
     print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return stms
