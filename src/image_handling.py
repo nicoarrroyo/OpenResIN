@@ -362,11 +362,6 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i,
     # axes on TCI "tracker" image are "number of chunks"
     axes[1][1].set_xticks(np.linspace(0, side_length, 8))
     axes[1][1].set_yticks(np.linspace(0, side_length, 8))
-# =============================================================================
-#     axes_tick_labels = np.linspace(0, chunks_per_side, 8).astype(int)
-#     axes[1][1].set_xticklabels(axes_tick_labels, fontsize=label_size)
-#     axes[1][1].set_yticklabels(axes_tick_labels, fontsize=label_size)
-# =============================================================================
     axes[1][1].set_xlabel("Chunk Column", fontsize=title_size-1)
     axes[1][1].set_ylabel("Chunk Row", fontsize=title_size-1)
     
@@ -377,7 +372,14 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i,
                                    facecolor=None)
     axes[1][1].add_patch(tci_tracker_square)
     
-    #plt.tight_layout()
+    plt.subplots_adjust(
+        left=0.01, 
+        right=0.99,
+        top=0.99,
+        bottom=0.01,
+        wspace=0.01,
+        hspace=0.01
+    )
     plt.show()
 
 def get_ndwi_patch(data, chunk_n, coordinates, g_min, g_max):
