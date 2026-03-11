@@ -296,30 +296,22 @@ def five_composite(index_arrays):
             continue
         
         print(f"stack start {dt.datetime.now().time():%H:%M:%S}")
-        stack = np.stack(arrays_list) # takes under 1 second
+        stack = np.stack(arrays_list)
         print(f"stack finish {dt.datetime.now().time():%H:%M:%S}")
         
-# =============================================================================
-#         p25, median, p75 = np.nanpercentile(stack, [25, 50, 75], axis=0)
-# =============================================================================
-# =============================================================================
-#         p25, median, p75 = np.percentile(stack, [25, 50, 75], axis=0)
-# =============================================================================
-# =============================================================================
-#         p25 = np.percentile(stack, 25, axis=0)
-# =============================================================================
-        
+        print(f"q start {dt.datetime.now().time():%H:%M:%S}")
         q = np.array([25., 50., 75.], dtype=np.float32)
-# =============================================================================
-#         p25, median, p75 = data_do.nanpercentile_3d(stack, q)
-# =============================================================================
+        print(f"q finish {dt.datetime.now().time():%H:%M:%S}")
+        
         print(f"p25, median, p75 start {dt.datetime.now().time():%H:%M:%S}")
         p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
         print(f"p25, median, p75 finish {dt.datetime.now().time():%H:%M:%S}")
         
+        print(f"mean start {dt.datetime.now().time():%H:%M:%S}")
         mean = np.nanpercentile(stack, 0, axis=0)
-        print(f"mean {dt.datetime.now().time():%H:%M:%S}")
+        print(f"mean finish {dt.datetime.now().time():%H:%M:%S}")
         
+        print(f"stms finish {dt.datetime.now().time():%H:%M:%S}")
         stms[index_name] = {
             "p25": p25, 
             "median": median, 
