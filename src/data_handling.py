@@ -3,7 +3,6 @@ import os
 import re
 import hashlib
 import numpy as np
-import cupy as cp
 
 def get_sen2_bands(high_res):
     RED_BAND = "04"
@@ -16,6 +15,7 @@ def get_sen2_bands(high_res):
 
 def gpu_nanpercentile(stack, q_list):
     try:
+        import cupy as cp
         stack_gpu = cp.asarray(stack)
         nan_mask = cp.isnan(stack_gpu)
         

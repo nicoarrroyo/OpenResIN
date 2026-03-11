@@ -286,14 +286,19 @@ def four_compute_indices(image_arrays):
 def five_composite(index_arrays):
     print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
     try:
+        import cupy; x = 2; cupy.sin(x); # checking for cuda install
         os.environ["CUDA_HOME"] = "C:/Program Files/"
         "NVIDIA GPU Computing Toolkit/CUDA/v13.2"
         use_cuda = True
     except:
         print("FAILURE: could not find the correct CUDA drivers")
-        print("TRYING: will use CPU for STM stacking "
-              "(significantly slower, unviable for high resolution)")
-        ui_do.confirm_continue_or_exit()
+        print("TRYING: will use CPU for STM stacking")
+        if c.HIGH_RES:
+            print("NOTE: Using the CPU is prohibitively slow for high "
+                  "resolution stacking; unfortunately, it is strongly "
+                  "recommended to use a discrete GPU from NVIDIA with the cupy"
+                  "library for best performance.")
+            ui_do.confirm_continue_or_exit()
         use_cuda = False
     
     print("compositing all images together")
@@ -302,8 +307,8 @@ def five_composite(index_arrays):
     for index_name, arrays_list in index_arrays.items():
         shapes = [a.shape for a in arrays_list]
         if len(set(shapes)) > 1:
-            print(f"WARNING: shape mismatch in {index_name} arrays: {shapes}")
-            print("skipping this index")
+            print(f"FAILURE: shape mismatch in {index_name} arrays: {shapes}")
+            print("TRYING: skip this index")
             continue
         
         stack = np.stack(arrays_list)
@@ -323,6 +328,24 @@ def five_composite(index_arrays):
     
     print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return stms
+
+def five_mean(index_arrays):
+    print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    print("calculating basic mean of all images")
+    mean = {}
+    
+    for index_name, arrays_list in index_arrays.items():
+        shapes = [a.shape for a in arrays_list]
+        if len(set(shapes)) > 1:
+            print(f"FAILURE: shape mismatch in {index_name} arrays: {shapes}")
+            print("TRYING: skip this index")
+            continue
+        
+        stack = np.stack(arrays_list)
+        mean[index_name] = np.percentile(stack, 0, axis=0)
+    
+    print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
+    return mean
 
 def fiveb_plot(ndwi_mean, folder_path):
     if c.SAVE_IMAGES:
@@ -697,7 +720,7 @@ def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
     else:
         global_min = np.nan
         global_max = 0.0
-        print("Warning: All NDWI chunks contained only NaN values.")
+        print("WARNING: All NDWI chunks contained only NaN values.")
 
     # #### 8.3 Save PNG Training Images per Class
     """One sub-folder per class is created inside labelling_path. Each

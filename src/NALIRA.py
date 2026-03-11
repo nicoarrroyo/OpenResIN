@@ -57,18 +57,22 @@ import pipeline_operations as operation
 import user_interfacing as ui_do
 import config_NALIRA as c
 
-ui_do.table_print(n_chunks=c.N_CHUNKS, n_images=c.N_IMAGES,
-                  high_res=c.HIGH_RES, 
-                  cloud_masking=c.CLOUD_MASKING, 
-                  known_feature_masking=c.KNOWN_FEATURE_MASKING, 
-                  show_plots=c.SHOW_INDEX_PLOTS, save_images=c.SAVE_IMAGES, 
-                  labelling=c.LABEL_DATA)
+ui_do.table_print(
+    n_chunks=c.N_CHUNKS, n_images=c.N_IMAGES, high_res=c.HIGH_RES, 
+    known_feature_masking=c.KNOWN_FEATURE_MASKING, 
+    cloud_masking=c.CLOUD_MASKING, 
+    compositing=c.COMPOSITING, 
+    show_plots=c.SHOW_INDEX_PLOTS, 
+    save_images=c.SAVE_IMAGES, 
+    labelling=c.LABEL_DATA)
 
 index_arrays = {"ndwi": [], "ndvi": []}
 tci_array = np.empty([1,1]); tci_60_array = np.empty([1,1])
 
 folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
 folders = ui_do.list_folders(folders_path)
+
+#pre_run_checks()
 
     # %% 1. Create Image Arrays
 for folder_num, folder in enumerate(folders):
@@ -122,8 +126,11 @@ for folder_num, folder in enumerate(folders):
 print("----------")
 print("| STEP 5 |")
 print("----------")
-stms = operation.five_composite(index_arrays)
-ndwi_mean = stms["ndwi"]["median"] # temporary. will replace with full stm
+if c.COMPOSITING:
+    stms = operation.five_composite(index_arrays)
+    ndwi_mean = stms["ndwi"]["median"] # temporary. will replace with full stm
+else:
+    ndwi_mean = operation.five_mean(index_arrays)
 
 if c.SHOW_INDEX_PLOTS:
     operation.fiveb_plot(ndwi_mean, folders_path)
