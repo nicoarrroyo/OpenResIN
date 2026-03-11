@@ -12,25 +12,10 @@ from omnicloudmask import predict_from_array
 import rasterio
 
 # %% Local Libraries
-# =============================================================================
-# from data_handling import rewrite, blank_entry_check, check_file_permission
-# from data_handling import extract_coords, change_to_folder, create_tf_example
-# from data_handling import hash_tfrecord
-# =============================================================================
 import data_handling as data_do
 import image_handling as image_do
 import misc
 import user_interfacing as ui_do
-
-# =============================================================================
-# from image_handling import image_to_array, known_feature_mask, mask_urban_areas
-# from image_handling import plot_indices, plot_chunks#, save_training_file
-# 
-# from misc import get_sentinel_bands, split_array, combine_sort_unique
-# 
-# from user_interfacing import table_print, prompt_roi, list_folders
-# from user_interfacing import confirm_continue_or_exit
-# =============================================================================
 
 import config_NALIRA as c
 
@@ -353,7 +338,7 @@ def fiveb_plot(ndwi_mean, folder_path):
         print("saving and displaying water index images")
     else:
         print("displaying water index images")
-    image_do.plot_indices(ndwi_mean, c.PLOT_SIZE, c.DPI, c.SAVE_IMAGES, 
+    image_do.plot_indices(ndwi_mean, c.PLOT_SIZE, c.SAVE_IMAGES, 
                           folder_path, c.RES)
     print(f"step 5b complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return
@@ -514,7 +499,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
         if break_flag:
             break
         image_do.plot_chunks(ndwi_mean, index_chunks, c.PLOT_SIZE_CHUNKS, i, 
-                    c.TITLE_SIZE, c.LABEL_SIZE, tci_chunks, tci_60_array)
+                    tci_chunks, tci_60_array)
         max_index = [0, 0]
         max_index[0] = round(np.nanmax(index_chunks[i]), 2)
         print(f"MAX ADJUSTED NDWI: {max_index[0]}", end=" | ")
@@ -596,7 +581,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                     except:
                         n_backs = 1
                     i -= n_backs
-                    ui_do.check_file_permission(file_name=data_file_path)
+                    data_do.check_file_permission(file_name=data_file_path)
                     with open(data_file_path, mode="r") as re: # read
                         rows = list(csv.reader(re))
                     for j in range(n_backs):
