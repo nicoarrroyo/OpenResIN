@@ -183,4 +183,3 @@ operation.eight_segment_data(
     index_chunks, 
     labelling_path, 
     prefix)
-
