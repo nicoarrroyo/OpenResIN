@@ -285,6 +285,17 @@ def four_compute_indices(image_arrays):
 # %% 5. Image compositing (and plotting)
 def five_composite(index_arrays):
     print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    try:
+        os.environ["CUDA_HOME"] = "C:/Program Files/"
+        "NVIDIA GPU Computing Toolkit/CUDA/v13.2"
+        use_cuda = True
+    except:
+        print("FAILURE: could not find the correct CUDA drivers")
+        print("TRYING: will use CPU for STM stacking "
+              "(significantly slower, unviable for high resolution)")
+        ui_do.confirm_continue_or_exit()
+        use_cuda = False
+    
     print("compositing all images together")
     stms = {}
     
@@ -297,9 +308,11 @@ def five_composite(index_arrays):
         
         stack = np.stack(arrays_list)
         
-        q = np.array([0., 25., 50., 75.], dtype=np.float32)
-        
-        mean, p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
+        if use_cuda:
+            q = np.array([0., 25., 50., 75.], dtype=np.float32)
+            mean, p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
+        else:
+            mean, p25, median, p75 = np.percentile(stack, [0, 25, 50, 75], axis=0)
         
         stms[index_name] = {
             "p25": p25, 

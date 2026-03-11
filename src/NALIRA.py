@@ -52,7 +52,6 @@ Outputs:
 # %% Start
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__))) # fix working directory
-os.environ["CUDA_HOME"] = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.2"
 import numpy as np
 import pipeline_operations as operation
 import user_interfacing as ui_do

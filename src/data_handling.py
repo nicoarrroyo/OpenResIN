@@ -2,7 +2,6 @@ import csv
 import os
 import re
 import hashlib
-from numba import njit, prange
 import numpy as np
 import cupy as cp
 
@@ -14,46 +13,6 @@ def get_sen2_bands(high_res):
     else:
         NIR_BAND = '8A'
     return GREEN_BAND, NIR_BAND, RED_BAND
-
-@njit(parallel=True)
-def nanpercentile_3d(stack, q):
-    """
-    stack shape: (n_images, height, width)
-    q: array of percentiles e.g. np.array([25., 50., 75.])
-    returns: (len(q), height, width)
-    """
-    n_images, height, width = stack.shape
-    n_q = len(q)
-    result = np.empty((n_q, height, width), dtype=np.float32)
-    
-    for row in prange(height): # parallelised across rows
-        for col in range(width):
-            col_vals = stack[:, row, col]
-            
-            # collect non-nan values
-            valid = np.empty(n_images, dtype=np.float32)
-            count = 0
-            for v in col_vals:
-                if not np.isnan(v):
-                    valid[count] = v
-                    count += 1
-            
-            if count == 0:
-                for qi in range(n_q):
-                    result[qi, row, col] = np.nan
-                continue
-            
-            valid_vals = np.sort(valid[:count])
-            
-            for qi in range(n_q):
-                idx = (q[qi] / 100.0) * (count - 1)
-                lo = int(idx)
-                hi = min(lo + 1, count - 1)
-                frac = idx - lo
-                result[qi, row, col] = (valid_vals[lo] * (1 - frac) 
-                                        + valid_vals[hi] * frac)
-    
-    return result
 
 def gpu_nanpercentile(stack, q_list):
     try:
