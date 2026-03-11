@@ -1,25 +1,23 @@
 import os
 
 # -- Processing Settings --
-DPI                     = 3000      # 3000 for full resolution, below 1000, images become fuzzy
 N_CHUNKS                = 5000      # number of chunks into which images are split
-HIGH_RES                = False     # use finer 10m spatial resolution (slower)
+HIGH_RES                = True     # use finer 10m spatial resolution (slower)
 RES = "10m" if HIGH_RES else "60m"
 KNOWN_FEATURE_MASKING   = False
 CLOUD_MASKING           = False
-COMPOSITING             = True
-SHOW_INDEX_PLOTS        = False
+COMPOSITING             = False
+SHOW_INDEX_PLOTS        = True
 SAVE_IMAGES             = False
 LABEL_DATA              = True
 # DATA_FILE_NAME          = "responses_" + str(N_CHUNKS) + "_chunks.csv"
 DATA_FILE_NAME_SUFFIX   = str(N_CHUNKS) + "chunks.csv"
 
-TITLE_SIZE              = 8         # title size of plots
-LABEL_SIZE              = 4         # label size (axes) of plots
-PLOT_SIZE               = (5, 5)    # larger plots increase detail and pixel count
-PLOT_SIZE_CHUNKS        = (5, 5)
+TITLE_SIZE              = 5         # title size of plots
+PLOT_SIZE               = (3, 3)    # larger plots increase detail and pixel count
+PLOT_SIZE_CHUNKS        = (4, 4)
 
-N_IMAGES                = 1         # how many of the images in the folder to use (-1 for all)
+N_IMAGES                = 1         # number of the found images to use (-1 for all)
 
 # -- Paths --
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
