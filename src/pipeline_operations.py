@@ -100,6 +100,7 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
         print("error: ", e)
         ui_do.confirm_continue_or_exit()
     
+    print(f"opening {c.RES} resolution band images")
     image_arrays = image_do.image_to_array(file_paths)
     
     # 1.2.2 Opening and Converting True Colour Images
@@ -255,6 +256,7 @@ def three_mask_clouds(image_arrays):
 
 # %% 4. Compute water indices (iterative)
 def four_compute_indices(image_arrays):
+    print(f"step 4 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("converting image array types")
     # first convert to float32 (np.uint16 type is bad for algebraic operations)!
     for i, image_array in enumerate(image_arrays):
@@ -262,7 +264,6 @@ def four_compute_indices(image_arrays):
     green, nir, red = image_arrays
     
     # 4.2 Calculating Indices
-    print(f"step 4 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("populating index arrays")
     np.seterr(divide="ignore", invalid="ignore")
     
@@ -294,16 +295,38 @@ def five_composite(index_arrays):
             print("skipping this index")
             continue
         
+        print(f"stack start {dt.datetime.now().time():%H:%M:%S}")
         stack = np.stack(arrays_list) # takes under 1 second
+        print(f"stack finish {dt.datetime.now().time():%H:%M:%S}")
         
-        mean, p25, median, p75 = np.nanpercentile(stack, [0, 25, 50, 75], axis=0)
-                
+# =============================================================================
+#         p25, median, p75 = np.nanpercentile(stack, [25, 50, 75], axis=0)
+# =============================================================================
+# =============================================================================
+#         p25, median, p75 = np.percentile(stack, [25, 50, 75], axis=0)
+# =============================================================================
+# =============================================================================
+#         p25 = np.percentile(stack, 25, axis=0)
+# =============================================================================
+        
+        q = np.array([25., 50., 75.], dtype=np.float32)
+# =============================================================================
+#         p25, median, p75 = data_do.nanpercentile_3d(stack, q)
+# =============================================================================
+        print(f"p25, median, p75 start {dt.datetime.now().time():%H:%M:%S}")
+        p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
+        print(f"p25, median, p75 finish {dt.datetime.now().time():%H:%M:%S}")
+        
+        mean = np.nanpercentile(stack, 0, axis=0)
+        print(f"mean {dt.datetime.now().time():%H:%M:%S}")
+        
         stms[index_name] = {
-            "median": median, 
             "p25": p25, 
+            "median": median, 
             "p75": p75, 
             "mean": mean
             }
+        print(f"stms {dt.datetime.now().time():%H:%M:%S}")
     
     print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return stms

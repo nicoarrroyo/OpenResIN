@@ -2,6 +2,9 @@ import csv
 import os
 import re
 import hashlib
+from numba import njit, prange
+import numpy as np
+import cupy as cp
 
 def get_sen2_bands(high_res):
     RED_BAND = "04"
@@ -11,6 +14,82 @@ def get_sen2_bands(high_res):
     else:
         NIR_BAND = '8A'
     return GREEN_BAND, NIR_BAND, RED_BAND
+
+@njit(parallel=True)
+def nanpercentile_3d(stack, q):
+    """
+    stack shape: (n_images, height, width)
+    q: array of percentiles e.g. np.array([25., 50., 75.])
+    returns: (len(q), height, width)
+    """
+    n_images, height, width = stack.shape
+    n_q = len(q)
+    result = np.empty((n_q, height, width), dtype=np.float32)
+    
+    for row in prange(height): # parallelised across rows
+        for col in range(width):
+            col_vals = stack[:, row, col]
+            
+            # collect non-nan values
+            valid = np.empty(n_images, dtype=np.float32)
+            count = 0
+            for v in col_vals:
+                if not np.isnan(v):
+                    valid[count] = v
+                    count += 1
+            
+            if count == 0:
+                for qi in range(n_q):
+                    result[qi, row, col] = np.nan
+                continue
+            
+            valid_vals = np.sort(valid[:count])
+            
+            for qi in range(n_q):
+                idx = (q[qi] / 100.0) * (count - 1)
+                lo = int(idx)
+                hi = min(lo + 1, count - 1)
+                frac = idx - lo
+                result[qi, row, col] = (valid_vals[lo] * (1 - frac) 
+                                        + valid_vals[hi] * frac)
+    
+    return result
+
+def gpu_nanpercentile(stack, q_list):
+    try:
+        stack_gpu = cp.asarray(stack)
+        nan_mask = cp.isnan(stack_gpu)
+        
+        # sort with nans pushed to end
+        stack_filled = cp.where(nan_mask, cp.inf, stack_gpu)
+        sorted_stack = cp.sort(stack_filled, axis=0)  # (n, h, w)
+        n_valid = cp.sum(~nan_mask, axis=0)  # (h, w)
+        
+        h, w = stack.shape[1], stack.shape[2]
+        row_idx = cp.arange(h)[:, None]
+        col_idx = cp.arange(w)[None, :]
+        
+        results = []
+        for q in q_list:
+            # linear interpolation index into sorted valid values
+            float_idx = (q / 100.0) * (n_valid - 1)
+            lo = cp.floor(float_idx).astype(cp.int32)
+            hi = cp.minimum(lo + 1, n_valid - 1)
+            frac = float_idx - lo
+            
+            lo_vals = sorted_stack[lo, row_idx, col_idx]
+            hi_vals = sorted_stack[hi, row_idx, col_idx]
+            interpolated = lo_vals * (1 - frac) + hi_vals * frac
+            interpolated[n_valid == 0] = cp.nan
+            results.append(cp.asnumpy(interpolated))
+        
+        del stack_gpu, sorted_stack, nan_mask, stack_filled
+        cp.get_default_memory_pool().free_all_blocks()
+        return np.array(results)  # shape: (len(q_list), h, w)
+    
+    except cp.cuda.memory.OutOfMemoryError:
+        print("WARNING: insufficient VRAM, falling back to CPU")
+        return np.nanpercentile(stack, q_list, axis=0)
 
 def rewrite(write_file, rows):
     """
@@ -134,8 +213,8 @@ def create_box(coords):
     center_x = (ulx + lrx) / 2.0
     center_y = (uly + lry) / 2.0
     
-    # --- 2. Create Initial Box centered around the input rectangle ---
-    # Half the size of the desired box
+    # --- 2. Create Initiall Box centered around the input rectangle ---
+    # half the sixze of desired
     half_size = BOX_SIZE / 2.0
     box_ulx = center_x - half_size
     box_uly = center_y - half_size
@@ -143,7 +222,7 @@ def create_box(coords):
     box_lry = center_y + half_size
     
     # --- 3. Adjust Box to stay within bounds [MIN_COORD, MAX_COORD] ---
-    # Adjust right edge if it exceeds MAX_COORD
+    # aalso adjust right edge if it exceeds MAX_COORD
     if box_lrx > MAX_COORD:
       offset = box_lrx - MAX_COORD
       box_lrx = MAX_COORD
@@ -155,16 +234,11 @@ def create_box(coords):
       box_lry = MAX_COORD
       box_uly -= offset # Shift top edge by the same amount
     
-    # Adjust left edge if it's less than MIN_COORD
-    # This needs to happen *after* adjusting the right edge in case shifting 
-    # left pushed it below MIN_COORD
     if box_ulx < MIN_COORD:
       offset = MIN_COORD - box_ulx
       box_ulx = MIN_COORD
       box_lrx += offset # Shift right edge by the same amount
     
-    # Adjust top edge if it's less than MIN_COORD
-    # This needs to happen *after* adjusting the bottom edge
     if box_uly < MIN_COORD:
         offset = MIN_COORD - box_uly
         box_uly = MIN_COORD
@@ -407,7 +481,6 @@ def deduplicate_by_max_confidence(class_prediction_list):
                   key=lambda item: item[0])
 
 import tensorflow as tf
-import numpy as np
 """
 Standard functons that can be used to convert training data into a format 
 that can be serialised by TensorFlow. This can make data read/write speeds 
