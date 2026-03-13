@@ -5,7 +5,13 @@ Created on Thu Mar 12 22:16:42 2026
 
 @author: nico
 NALIRA LOW POWER / NALIRA-LP / LOW POWER NALIRA
+Low-power variant of NALIRA. Opens images normally, then immediately splits
+each full image into chunks. All processing (cloud masking, known feature
+masking, index calculation, compositing) is done chunk-by-chunk so that
+machines without discrete GPUs (e.g. laptops) can run the data labelling
+portion of NALIRA without holding entire processed images in memory.
 """
+
 
 import numpy as np
 import omnicloudmask as ocm
@@ -106,7 +112,7 @@ while i < 5:
     # ==== spectral temporal metrics ==== #
     for index_name, arrays_list in index_chunk_arrays.items():
         stack = np.stack(arrays_list)
-        p25, median, p75 = np.percentile(stack, [25, 50, 75], axis=0)
+        p25, median, p75 = np.nanpercentile(stack, [25, 50, 75], axis=0)
         mean = np.nanmean(stack, axis=0)
         
         chunk_stms[index_name] = ({
@@ -120,6 +126,7 @@ while i < 5:
     # ==== display chunks ==== #
     ndwi_mean = chunk_stms["ndwi"]["median"]
     plt.imshow(ndwi_mean)
+    plt.show()
     i += 1
     
 
