@@ -55,6 +55,8 @@ os.chdir(os.path.dirname(os.path.abspath(__file__))) # fix working directory
 import numpy as np
 import pipeline_operations as operation
 import user_interfacing as ui_do
+from misc import pre_run_checks
+
 import config_NALIRA as c
 
 ui_do.table_print(
@@ -72,7 +74,7 @@ tci_array = np.empty([1,1]); tci_60_array = np.empty([1,1])
 folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
 folders = ui_do.list_folders(folders_path)
 
-#pre_run_checks()
+pre_run_checks()
 
     # %% 1. Create Image Arrays
 for folder_num, folder in enumerate(folders):
@@ -85,7 +87,6 @@ for folder_num, folder in enumerate(folders):
     [image_arrays, 
      image_metadata, 
      prefix, 
-     images_path, 
      tci_array, 
      tci_60_array
      ] = operation.one_create_image_arrays(
@@ -130,7 +131,7 @@ if c.COMPOSITING:
     stms = operation.five_composite(index_arrays)
     ndwi_mean = stms["ndwi"]["median"] # temporary. will replace with full stm
 else:
-    ndwi_mean = operation.five_mean(index_arrays)
+    ndwi_mean = operation.five_mean(index_arrays)["ndwi"]
 
 if c.SHOW_INDEX_PLOTS:
     operation.fiveb_plot(ndwi_mean, folders_path)
@@ -142,9 +143,7 @@ print("----------")
 print("| STEP 6 |")
 print("----------")
 if c.LABEL_DATA:
-    [index_chunks, 
-     tci_chunks, 
-     break_flag, 
+    [break_flag, 
      i, 
      data_file_path, 
      data_correction, 
@@ -153,8 +152,6 @@ if c.LABEL_DATA:
      last_chunk, 
      labelling_path
      ] = operation.six_prepare_data(
-         ndwi_mean, 
-         tci_array, 
          folders, 
          prefix
          )
@@ -166,11 +163,10 @@ print("----------")
 print("| STEP 7 |")
 print("----------")
 if c.LABEL_DATA:
-    operation.seven_label_data(
+    index_chunks = operation.seven_label_data(
          i, 
-         index_chunks, 
          ndwi_mean, 
-         tci_chunks, 
+         tci_array, 
          tci_60_array, 
          data_file_path, 
          data_correction, 
