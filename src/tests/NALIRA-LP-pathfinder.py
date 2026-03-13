@@ -13,15 +13,6 @@ def split_array(array, n_chunks):
     chunks = [subarray for row_chunk in split_arrays for subarray in row_chunk]
     return chunks
 
-# this pathfinder script is to validate the improved "low-power" pipeline for NALIRA. it changes the order of operations. 
-# instead of conducting large and computationally expensive operations on very large matrices (entire images), it conducts those same operations on significantly smaller matrices (chunks, not entire images). 
-# for example, instead of conducting omnicloudmask inference on an entire satellite image and then creating smaller labelling chunks, NALIRA-LP-pathfinder is designed to create the small labelling chunks and then apply omnicloudmask inference to the tiny chunk. 
-# chunks are ~127x127 pixels and a full satellite image is ~11000x11000
-# the total duration of omnicloudmask if you were to go chunk-by-chunk or on the entire image in one sweep is the same; if anything, chunk-by-chunk is probably slower. 
-# however, this NALIRA-LP approach could be much faster for data labelling, where you are only looking at one chunk at a time. 
-# instead of having to wait over an hour (on integrated graphics) for omnicloudmask inference on a full satellite image, you can wait a fraction of a second for the inference on a tiny labelling chunk instead. 
-# this effectively makes the data labelling pipeline significantly more accessible for low-power computers. 
-
 import numpy as np
 import omnicloudmask as ocm
 import torch
@@ -64,21 +55,29 @@ while i < 5:
     for img_chunks in img_chunks_list:
         img_chunk = img_chunks[i]
         
-        # ==== mask clouds ==== #
-        mask.append(
-            ocm.predict_from_array(
-                img_chunk[i], patch_size=127, 
-                patch_overlap=64, 
-                inference_device="cpu", 
-                inference_dtype="fp32"
-                )[0]
-            )
-        
         # ==== mask known features ==== #
         pass
         
+        # ==== mask clouds ==== #
+        pred_mask_2d = ocm.predict_from_array(
+            img_chunk[i], patch_size=127, 
+            patch_overlap=64, 
+            inference_device="cpu", 
+            inference_dtype="fp32"
+            )[0]
+        
+        combined_mask = (
+            (pred_mask_2d == 1) | 
+            (pred_mask_2d == 2) | 
+            (pred_mask_2d == 3)
+            )
+        
+        # float is used as it supports NaN
+        # img_chunk = img_chunk.astype(np.float32) initialised above
+        img_chunk[combined_mask] = np.nan
+        
         # ==== calculate indices ==== #
-        green, nir, red = img_chunk[i]
+        green, nir, red = img_chunk
         ndwi = (green - nir) / (green + nir)
         ndvi = ((nir - red) / (nir + red))
         index_arrays = {"ndwi": ndwi, "ndvi": ndvi}
