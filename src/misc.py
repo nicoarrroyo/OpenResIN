@@ -1,52 +1,41 @@
 import numpy as np
 import random
 import math
+import config_NALIRA as c
 
-def get_sentinel_bands(sentinel_n, high_res):
-    """ 
-    THIS FUNCTION IS BEING DEPRACATED IN FAVOUR OF `get_sen2_bands` in data_handling
-    OUT OF DATE
-    Sentinel 2 has thirteen spectral bands, five of which are of interest for 
-    the calculation of water detection indices. The blue, green, and near-
-    infrared (NIR) bands can achieve 10 metre spatial resolution, while both 
-    the short-wave infrared (SWIR) 1 and 2 can achieve 20 metre spatial 
-    resolution. All bands also have 60 metre resolution versions. 
+def pre_run_checks():
+    if c.LABEL_DATA and not c.KNOWN_FEATURE_MASKING:
+        print("WARNING: LABEL_DATA enabled with KNOWN_FEATURE_MASKING disabled")
     
-    Most bands have the same numbering whether they are low or 
-    high resolution, except for the NIR band, which is number "08" in high-res 
-    and "8A" in low-res. Low-res is favourable for quicker runs, while 
-    high-res is necessary for any actual data generation and handling. 
+    if c.LABEL_DATA and not c.CLOUD_MASKING:
+        print("WARNING: LABEL_DATA enabled with CLOUD_MASKING disabled")
     
-    Parameters
-    ----------
-    sentinel_n : int
-        The number of Sentinel satellite. This function currently only has 
-        information about Sentinel 2 bands. 
-    high_res : bool
-        Variable that decides whether to extract the 10 metre or 60 metre 
-        version of the NIR band.
+    if c.CLOUD_MASKING and not c.HIGH_RES:
+        print("WARNING: CLOUD_MASKING enabled with HIGH_RES disabled")
     
-    Returns
-    -------
-    BLUE_BAND : string
-        The number (as a string) of the blue band in Sentinel 2 data.
-    GREEN_BAND : string
-        The number (as a string) of the green band in Sentinel 2 data.
-    NIR_BAND : string
-        The number (as a string) of the NIR band in Sentinel 2 data.
-    SWIR1_BAND : string
-        The number (as a string) of the SWIR1 band in Sentinel 2 data.
-    SWIR2_BAND : string
-        The number (as a string) of the SWIR2 band in Sentinel 2 data.
-    """
-    if sentinel_n == 2:
-        RED_BAND = "04"
-        GREEN_BAND = '03'
-        if high_res:
-            NIR_BAND = '08'
-        else:
-            NIR_BAND = '8A'
-        return GREEN_BAND, NIR_BAND, RED_BAND
+    if c.CLOUD_MASKING:
+        try:
+            from omnicloudmask import predict_from_array
+            try: # check if omnicloudmask can be used
+                predict_from_array(
+                    np.random.rand(3, 32, 32).astype(np.float32), 
+                    patch_size=32, 
+                    patch_overlap=31,
+                    inference_device="cuda"
+                    )
+            except:
+                print("WARNING: CLOUD_MASKING enabled but no NVIDIA GPU found")
+                print("FIX: disable CLOUD_MASKING or $$$ sorry")
+        except:
+            print("WARNING: CLOUD_MASKING enabled but no ""OmniCloudMask "
+                  "module found")
+            print("FIX: disabled CLOUD_MASKING or install OmniCloudMask")
+    
+    if c.LABEL_DATA and not c.HIGH_RES:
+        print("WARNING: LABEL_DATA enabled with HIGH_RES disabled")
+        print("Labelling images will be unclear")
+        print("FIX: enable HIGH_RES for good labelling")
+    
 
 def split_array(array, n_chunks):
     """
@@ -65,7 +54,7 @@ def split_array(array, n_chunks):
         A list containing every chunk split off from the full array.
     
     """
-    rows = np.array_split(array, np.sqrt(n_chunks), axis=0) # split into rows
+    rows = np.array_split(array, np.sqrt(n_chunks))#, axis=0) # split into rows
     split_arrays = [np.array_split(row_chunk, np.sqrt(n_chunks), 
                                    axis=1) for row_chunk in rows]
     chunks = [subarray for row_chunk in split_arrays for subarray in row_chunk]
