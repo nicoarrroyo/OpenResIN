@@ -5,13 +5,6 @@ Image.MAX_IMAGE_PIXELS = 150_000_000
 from matplotlib import pyplot as plt
 from matplotlib import colors
 
-import geopandas as gpd
-import fiona
-import rasterio
-from rasterio import features
-from rasterio.windows import from_bounds
-from rasterio.warp import reproject, Resampling
-
 def image_to_array(file_path_s):
     """
     Convert an image or list of images to a numpy array. The image is opened 
@@ -57,6 +50,9 @@ def get_image_bounds(image_metadata):
 
 def known_feature_mask(image_array, image_metadata, data_path, 
                        feature_type, buffer_metres=None):
+    from rasterio import features
+    import geopandas as gpd
+    import fiona
     s2_bounds_tuple = get_image_bounds(image_metadata)
     s2_crs = image_metadata["crs"]
     
@@ -111,7 +107,9 @@ def known_feature_mask(image_array, image_metadata, data_path,
 
 def mask_urban_areas(image_array, image_metadata, urban_data_path):
     s2_bounds_tuple = get_image_bounds(image_metadata)
-    # s2_crs = image_metadata["crs"]
+    import rasterio
+    from rasterio.windows import from_bounds
+    from rasterio.warp import reproject, Resampling
     
     with rasterio.open(urban_data_path) as urban_src:
         window = from_bounds(*s2_bounds_tuple, transform=urban_src.transform)
