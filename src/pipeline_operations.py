@@ -5,11 +5,9 @@ import csv
 import datetime as dt
 import sys
 
-# %% Third Party Libraries
+# %% Common Third Party Libraries
 import numpy as np
 from PIL import Image
-from omnicloudmask import predict_from_array
-import rasterio
 
 # %% Local Libraries
 import data_handling as data_do
@@ -21,6 +19,7 @@ import config_NALIRA as c
 
 # %% 1. Creating image arrays (iterative)
 def one_create_image_arrays(folders_path, folder, tci_60_array):
+    import rasterio
     print(f"step 1 beginning at {dt.datetime.now().time():%H:%M:%S}")
     
     # 1.1 Establishing Paths
@@ -110,7 +109,6 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
     print(f"step 1 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return [image_arrays, 
             image_metadata, 
-            prefix, 
             images_path, 
             tci_array, 
             tci_60_array]
@@ -202,6 +200,7 @@ def two_mask_known_feature(image_arrays, image_metadata):
 
 # %% 3. Masking out clouds (OmniCloudMask) (iterative)
 def three_mask_clouds(image_arrays):
+    from omnicloudmask import predict_from_array
     if not c.HIGH_RES:
         print(("WARNING: high-resolution setting is disabled. "
         "cloud masking may not be accurate"))
@@ -209,21 +208,27 @@ def three_mask_clouds(image_arrays):
     
     print(f"step 3 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("masking clouds")
-    input_array = np.stack((
+    input_array = np.stack(
+        (
         image_arrays[2], # red
         image_arrays[0], # green
         image_arrays[1]  # nir
         ))
     
     try:
-        pred_mask_2d = predict_from_array(input_array, 
-                                          mosaic_device="cuda")[0]
+        pred_mask_2d = predict_from_array(
+            input_array, 
+            inference_dtype="bf16",
+            batch_size=4,
+            mosaic_device="cuda"
+            )[0]
     except Exception as e:
         print(f"FAILURE: call to CUDA (due to error: {e})")
         print("TRYING: use CPU for inference (slower)")
         ui_do.confirm_continue_or_exit()
-        pred_mask_2d = predict_from_array(input_array, 
-                                          mosaic_device="cpu")[0]
+        pred_mask_2d = predict_from_array(
+            input_array, 
+            mosaic_device="cpu")[0]
     
     combined_mask = (
         (pred_mask_2d == 1) | 
@@ -282,7 +287,7 @@ def five_composite(index_arrays):
             print("NOTE: Using the CPU is prohibitively slow for high "
                   "resolution stacking; unfortunately, it is strongly "
                   "recommended to use a discrete GPU from NVIDIA with the cupy"
-                  "library for best performance.")
+                  " library for best performance.")
             ui_do.confirm_continue_or_exit()
         use_cuda = False
     
@@ -344,17 +349,8 @@ def fiveb_plot(ndwi_mean, folder_path):
     return
 
 # %% 6. Data preparation
-def six_prepare_data(ndwi_mean, tci_array, folders, prefix):
-    # 6.1 Creating Chunks from Satellite Imagery
-    """Split the NDWI array into N_CHUNKS equal segments for batch ROI 
-    labelling and parallel processing."""
-    print(f"step 6 beginning at {dt.datetime.now().time():%H:%M:%S}")
-    print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
-    index_chunks = misc.split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
-    if c.LABEL_DATA:
-        tci_chunks = misc.split_array(array=tci_array, n_chunks=c.N_CHUNKS)
-    
-    # 6.2 Preparing File for Labelling
+def six_prepare_data(folders, prefix):
+    # 6.1 Preparing File for Labelling
     """Initialise or validate the CSV file by enforcing a header, removing 
     blank lines, and ensuring sequential chunk indices"""
     break_flag = False
@@ -378,7 +374,7 @@ def six_prepare_data(ndwi_mean, tci_array, folders, prefix):
     data_file_path = os.path.join(labelling_path, data_file_name)
     data_do.blank_entry_check(file=data_file_path) # remove all blank entries
     
-    # 6.2.1 File validity check
+    # 6.1.1 File validity check
     """This section is about checking that the contents of the file are sound. 
     This means checking that, for example, the file exists, or that the entry 
     for chunk 241 is after the entry for chunk 240, or any other problem that 
@@ -425,7 +421,7 @@ def six_prepare_data(ndwi_mean, tci_array, folders, prefix):
 
     i = last_chunk + 1 # from this point on, "i" is off-limits as a counter
 
-    # 6.2.2 Data completion check
+    # 6.1.2 Data completion check
     """Once file validity has been verified, this step is for ensuring that 
     the data in the file is complete. While the previous step (6.3.1) was 
     mostly intended for checking that the chunks are in the correct order, 
@@ -479,19 +475,26 @@ def six_prepare_data(ndwi_mean, tci_array, folders, prefix):
                "incomplete, missing, or incorrect coordinate data")
         i = invalid_rows[0]
     print(f"step 6 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
-    return [index_chunks, tci_chunks, break_flag, i, data_file_path, data_correction, 
+    return [break_flag, i, data_file_path, data_correction, 
             invalid_rows, lines, last_chunk, labelling_path]
 
 # %% 7. Data labelling
-def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array, 
-                     data_file_path, data_correction, invalid_rows, 
-                     lines, last_chunk):
+def seven_label_data(i, ndwi_mean, tci_array, tci_60_array, data_file_path, 
+                     data_correction, invalid_rows, lines, last_chunk):
     # ### 7. Data Labelling
     print(f"step 7 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("data labelling start")
     break_flag = False
     
-    # #### 7.1 Outputting Images
+    # 7.1 Creating Chunks from Satellite Imagery
+    """Split the NDWI array into N_CHUNKS equal segments for batch ROI 
+    labelling and parallel processing."""
+    print(f"step 6 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
+    index_chunks = misc.split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
+    tci_chunks = misc.split_array(array=tci_array, n_chunks=c.N_CHUNKS)
+    
+    # #### 7.2 Outputting Images
     print("outputting images...")
     invalid_rows_index = 0
     
@@ -506,7 +509,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
         max_index[1] = round(np.nanmax(index_chunks[i]), 2)
         print(f"MAX NDWI: {max_index[1]}")
         
-        # #### 7.2 User Labelling
+        # #### 7.3 User Labelling
         data_do.blank_entry_check(file=data_file_path)
         if data_correction:
             print((
@@ -524,7 +527,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
             data_do.blank_entry_check(file=data_file_path)
             back_flag = False
             try:
-                # #### 7.2.1 Regular integer response
+                # #### 7.3.1 Regular integer response
                 """Parse integer input for reservoirs and bodies, enfore 
                 maximum limits, and prompt ROI drawing and collect 
                 coordinates."""
@@ -564,19 +567,17 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                 n_reservoirs = str(n_reservoirs)
                 n_bodies = str(n_bodies)
                 if "break" in n_bodies or "break" in n_reservoirs:
-                    # ##### 7.2.2 Non-integer response: "break"
-                    """nico!! remember to add a description!"""
+                    # ##### 7.3.2 Non-integer response: "break"
                     print("taking a break")
                     break_flag = True
                     break
                 if "back" in n_bodies or "back" in n_reservoirs:
-                    # ##### 7.2.3 Non-integer response: "back"
-                    """nico!! remember to add a description!"""
+                    # ##### 7.3.3 Non-integer response: "back"
                     back_flag = True
                     if data_correction:
                         print("cannot use 'back' during data correction")
                         break
-                    try:
+                    try: # TODO this could be replaced with a finally: maybe?
                         n_backs = int(n_reservoirs.split(" ")[1])
                     except:
                         n_backs = 1
@@ -589,15 +590,14 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                     with open(data_file_path, mode="w") as wr: # write
                         data_do.rewrite(write_file=wr, rows=rows)
                     break
-                # ##### 7.2.4 Non-integer response: error
-                """nico!! remember to add a description!"""
+                # ##### 7.3.4 Non-integer response: error
                 print("error: non-integer response."
                       "\ntype 'break' to save and quit"
                       "\ntype 'back' to go to previous chunk")
                 n_reservoirs = input("how many "
                                      "reservoirs? ").strip().lower()
         
-        # #### 7.3 Saving Results
+        # #### 7.4 Saving Results
         """nico!! remember to add a description!"""
         if break_flag:
             break
@@ -627,7 +627,7 @@ def seven_label_data(i, index_chunks, ndwi_mean, tci_chunks, tci_60_array,
                 with open(data_file_path, mode="a") as ap: # append
                     ap.write(f"\n{csv_entry}")
     print(f"step 7 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
-    return
+    return index_chunks
 
 # %% 8. Data segmentation
 def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
