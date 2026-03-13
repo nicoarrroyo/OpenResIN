@@ -275,13 +275,14 @@ def four_compute_indices(image_arrays):
 # %% 5. Image compositing (and plotting)
 def five_composite(index_arrays):
     print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    # start by checking for cuda install
     try:
-        import cupy; x = 2; cupy.sin(x); # checking for cuda install
-        os.environ["CUDA_HOME"] = "C:/Program Files/"
-        "NVIDIA GPU Computing Toolkit/CUDA/v13.2"
+        import cupy; x = 2; cupy.sin(x);
+        os.environ["CUDA_HOME"] = ("C:/Program Files/"
+                                   "NVIDIA GPU Computing Toolkit/CUDA/v13.2")
         use_cuda = True
     except:
-        print("FAILURE: could not find the correct CUDA drivers")
+        print("FAILURE: could not find CUDA drivers") # known limitation
         print("TRYING: will use CPU for STM stacking")
         if c.HIGH_RES:
             print("NOTE: Using the CPU is prohibitively slow for high "
@@ -304,10 +305,14 @@ def five_composite(index_arrays):
         stack = np.stack(arrays_list)
         
         if use_cuda:
-            q = np.array([0., 25., 50., 75.], dtype=np.float32)
-            mean, p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
+            q = np.array([25., 50., 75.], dtype=np.float32)
+            p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
+            
+            import cupy as cp
+            mean = cp.nanmean(stack, axis=0)
         else:
-            mean, p25, median, p75 = np.percentile(stack, [0, 25, 50, 75], axis=0)
+            p25, median, p75 = np.percentile(stack, [25, 50, 75], axis=0)
+            mean = np.nanmean(stack, axis=0)
         
         stms[index_name] = {
             "p25": p25, 
@@ -332,7 +337,7 @@ def five_mean(index_arrays):
             continue
         
         stack = np.stack(arrays_list)
-        mean[index_name] = np.percentile(stack, 0, axis=0)
+        mean[index_name] = np.nanmean(stack, axis=0)
     
     print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return mean
