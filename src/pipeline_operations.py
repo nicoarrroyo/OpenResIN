@@ -19,25 +19,35 @@ import config_NALIRA as c
 
 # %% 1. Creating image arrays (iterative)
 def one_create_image_arrays(folders_path, folder, tci_60_array):
+    """
+    Navigates Sentinel-2 directory structures to locate, open, and convert 
+    image files into arrays.
+    
+    Parses folder naming conventions to locate the 'GRANULE' directory. 
+    Extracts high-resolution (10m) band images and True Colour Images (TCI), 
+    converting them into NumPy arrays. Low resolution is only used for 
+    troubleshooting. TCI arrays are also resized to aid GUI labelling.
+    
+    Args:
+        folders_path (str): The base directory containing the satellite 
+        imagery folders.
+        folder (str): The specific Sentinel-2 folder name being processed.
+        tci_60_array (np.ndarray): An existing 60m resolution TCI array, or an 
+        empty array.
+        
+    Returns:
+        list: Contains [image_arrays, image_metadata, 
+                        images_path, tci_array, tci_60_array].
+    """
     import rasterio
     print(f"step 1 beginning at {dt.datetime.now().time():%H:%M:%S}")
     
     # 1.1 Establishing Paths
-    """Most Sentinel 2 files that come packaged in a satellite image 
-    folder follow naming conventions that use information contained in the 
-    title of the folder. This information can be used to easily navigate 
-    through the folder's contents."""
     file_paths = []
     folder_path = os.path.join(folders_path, folder)
     images_path = os.path.join(folder_path, "GRANULE")
     
     # 1.1.1 Subfolder iterative search
-    """This folder has a strange naming convention that doesn't quite apply 
-    to the other folders, so it's difficult to find a rule that would work 
-    for any Sentinel 2 image. The easier way of finding this folder is by 
-    searching for any available directories in the GRANULE folder, and if 
-    there is more than one, then alert the user and exit, otherwise go into 
-    that one directory because it will be the one we're looking for."""
     subdirs = [d for d in os.listdir(images_path) 
                if os.path.isdir(os.path.join(images_path, d))]
     if len(subdirs) == 1:
@@ -47,15 +57,6 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
         ui_do.confirm_continue_or_exit()
     
     # 1.1.2 Resolution selection and file name deconstruction
-    """Low resolution should only be used for troubleshooting as it does 
-    not produce usable training data. High resolution uses the 10m spatial 
-    resolution images but processing time is significantly longer. To save 
-    some space, when splitting the folder name into its parts, some of the 
-    splitting functions outputs are suppressed. In order, the variables not 
-    assigned are: sentinel number, instrument and product level, 
-    processing baseline number, relative orbit number, and product 
-    discriminator and format."""
-    
     (_, _, datatake_start_sensing_time, _, _, 
      tile_number_field, _) = folder.split("_")
     
@@ -72,10 +73,6 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
             )
     
     # 1.2.1 Opening and Converting Band Images
-    """This operation takes a long time because the image files are so big. 
-    The difference in duration for this operation between using and not 
-    using HIGH_RES is a factor of about 20, but, again, not using HIGH_RES 
-    results in unusable images."""
     try:
         with rasterio.open(file_paths[0]) as src:
             image_metadata = src.meta.copy()
@@ -92,8 +89,6 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
         tci_array = np.empty([1,1])
         tci_60_array = np.empty([1,1])
     if c.LABEL_DATA:
-        """Load the TCI file at selected resolution, convert to array, resize for 
-        GUI labelling."""
         print(f"opening {c.RES} resolution true colour image")
         
         tci_path = os.path.join(images_path, f"R{c.RES}")
@@ -115,6 +110,20 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
 
 # %% 2. Masking out known features (iterative)
 def two_mask_known_feature(image_arrays, image_metadata):
+    """
+    Applies geographic masks to the image arrays to remove known features.
+    
+    Uses shapefiles and GeoTIFFs to mask out rivers, the sea, known reservoirs, 
+    and urban areas from the satellite imagery. This prevents these features 
+    from causing false positives during the water body identification training.
+    
+    Args:
+        image_arrays (list): List of image band arrays (Green, NIR, Red).
+        image_metadata (dict): Metadata associated with the rasterized images.
+        
+    Returns:
+        list: The modified image_arrays with known features masked out.
+    """
     print(f"step 2 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("masking out known features")
     
@@ -200,6 +209,7 @@ def two_mask_known_feature(image_arrays, image_metadata):
 
 # %% 3. Masking out clouds (OmniCloudMask) (iterative)
 def three_mask_clouds(image_arrays):
+    
     from omnicloudmask import predict_from_array
     if not c.HIGH_RES:
         print(("WARNING: high-resolution setting is disabled. "
@@ -246,6 +256,7 @@ def three_mask_clouds(image_arrays):
 
 # %% 4. Compute water indices (iterative)
 def four_compute_indices(image_arrays):
+    
     print(f"step 4 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("converting image array types")
     # first convert to float32 (np.uint16 type is bad for algebraic operations)!
@@ -355,9 +366,26 @@ def fiveb_plot(ndwi_mean, folder_path):
 
 # %% 6. Data preparation
 def six_prepare_data(folders, prefix):
+    """
+    Initializes and validates the labelling CSV file to ensure data integrity 
+    and sequential ordering.
+    
+    Creates or loads the training data CSV, removes blank entries, and enforces 
+    structural validity (e.g., verifying chunks are in sequential order). It 
+    also performs a completion check to flag any chunks that claim to contain 
+    water bodies but are missing coordinate data, activating a 
+    'data_correction' mode to prompt the user to fix them.
+    
+    Args:
+        folders (list): List of available data folders.
+        prefix (str): Prefix string derived from the satellite image name.
+        
+    Returns:
+        list: State variables including break_flag, starting index (i), 
+        paths, correction flags, and invalid rows required for the labelling 
+        loop.
+    """
     # 6.1 Preparing File for Labelling
-    """Initialise or validate the CSV file by enforcing a header, removing 
-    blank lines, and ensuring sequential chunk indices"""
     break_flag = False
     
     # check for a responses folder
@@ -380,17 +408,6 @@ def six_prepare_data(folders, prefix):
     data_do.blank_entry_check(file=data_file_path) # remove all blank entries
     
     # 6.1.1 File validity check
-    """This section is about checking that the contents of the file are sound. 
-    This means checking that, for example, the file exists, or that the entry 
-    for chunk 241 is after the entry for chunk 240, or any other problem that 
-    may arise. As with every data handling operation, file permission is 
-    checked directly before this step, as well as any blank entries. Although 
-    this may seem an excessive step to perform every time, it is necessary to 
-    ensure that the file data is exactly as it should be. 
-    All these checks are carried out in 'read-only' mode unless the user 
-    specifies otherwise. This is to make sure that the data is not accidentally 
-    overwritten at any point, again, unless the user is sure this is the 
-    intended behaviour."""
     print("preparing file for labelling")
     
     header = ("chunk,reservoirs,water-bodies,reservoir-"
@@ -427,15 +444,6 @@ def six_prepare_data(folders, prefix):
     i = last_chunk + 1 # from this point on, "i" is off-limits as a counter
 
     # 6.1.2 Data completion check
-    """Once file validity has been verified, this step is for ensuring that 
-    the data in the file is complete. While the previous step (6.3.1) was 
-    mostly intended for checking that the chunks are in the correct order, 
-    this step additionally checks that the chunks that are supposed to have 
-    data, i.e. a chunk is noted as containing a reservoir, that there are 
-    coordinates outlining that reservoir. If this is not the case, the 
-    'data_correction' mode is activated, in which the user is prompted to 
-    essentially fill in the coordinates that should exist in the place where 
-    a chunk is supposed to contain some water body."""
     # find chunks with invalid or incomplete reservoir coordinate data
     reservoir_rows = []
     body_rows = []
@@ -486,14 +494,38 @@ def six_prepare_data(folders, prefix):
 # %% 7. Data labelling
 def seven_label_data(i, ndwi_mean, tci_array, tci_60_array, data_file_path, 
                      data_correction, invalid_rows, lines, last_chunk):
+    """
+    Provides an interactive GUI loop for users to label regions of interest 
+    (ROIs) within image chunks.
+    
+    Splits the aggregated NDWI and TCI arrays into smaller segments for batch 
+    ROI labelling. Iterates through these chunks, prompting the user to specify 
+    the number of reservoirs/water bodies and draw bounding boxes. Handles 
+    regular inputs, navigation commands ('back', 'break'), and saves the 
+    extracted coordinates to the CSV file.
+    
+    Args:
+        i (int): The current chunk index.
+        ndwi_mean (np.ndarray): The processed NDWI array.
+        tci_array (np.ndarray): The True Colour Image array.
+        tci_60_array (np.ndarray): The resized 60m TCI array for context.
+        data_file_path (str): Path to the labelling CSV file.
+        data_correction (bool): Flag indicating if the user is correcting 
+        incomplete data.
+        invalid_rows (list): List of row indices that require data correction.
+        lines (list): The current lines of the CSV file.
+        last_chunk (int): The integer index of the final chunk.
+        
+    Returns:
+        list: The generated list of split NDWI chunks.
+    """
+    
     # ### 7. Data Labelling
     print(f"step 7 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("data labelling start")
     break_flag = False
     
     # 7.1 Creating Chunks from Satellite Imagery
-    """Split the NDWI array into N_CHUNKS equal segments for batch ROI 
-    labelling and parallel processing."""
     print(f"step 6 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
     index_chunks = misc.split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
@@ -533,9 +565,6 @@ def seven_label_data(i, ndwi_mean, tci_array, tci_60_array, data_file_path,
             back_flag = False
             try:
                 # #### 7.3.1 Regular integer response
-                """Parse integer input for reservoirs and bodies, enfore 
-                maximum limits, and prompt ROI drawing and collect 
-                coordinates."""
                 # handle number of reservoirs entry
                 n_reservoirs = int(n_reservoirs)
                 entry_list = [i,n_reservoirs,""]
@@ -582,7 +611,7 @@ def seven_label_data(i, ndwi_mean, tci_array, tci_60_array, data_file_path,
                     if data_correction:
                         print("cannot use 'back' during data correction")
                         break
-                    try: # TODO this could be replaced with a finally: maybe?
+                    try:
                         n_backs = int(n_reservoirs.split(" ")[1])
                     except:
                         n_backs = 1
@@ -603,7 +632,6 @@ def seven_label_data(i, ndwi_mean, tci_array, tci_60_array, data_file_path,
                                      "reservoirs? ").strip().lower()
         
         # #### 7.4 Saving Results
-        """nico!! remember to add a description!"""
         if break_flag:
             break
         if not break_flag and not back_flag:
@@ -636,12 +664,25 @@ def seven_label_data(i, ndwi_mean, tci_array, tci_60_array, data_file_path,
 
 # %% 8. Data segmentation
 def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
+    """
+    Segments labelled chunks into individual training images and saves them 
+    by class.
+    
+    Reads coordinate data from the CSV file and extracts localized patches from 
+    the NDWI chunks for four classes: reservoirs, water-bodies, land, and sea. 
+    Unlabelled land/sea chunks use a fixed centre-crop. Computes global 
+    normalization bounds to improve feature contrast, replaces NaN values with 
+    a distinguishable mid-grey, and saves the patches as 8-bit greyscale PNGs.
+    
+    Args:
+        data_file_path (str): Path to the labelled CSV file containing 
+        coordinates.
+        index_chunks (list): List of split NDWI chunk arrays.
+        labelling_path (str): Directory where the segmented class folders 
+        will be saved.
+        prefix (str): Image prefix used for naming the saved PNG files.
+    """
     # #### 8.1 Extract Reservoir and Water Body Coordinates
-    """Reads the labelled CSV file and builds per-class coordinate lists.
-    Each entry in a coords list is a tuple of (line_index, coordinates),
-    where coordinates are the pixel bounds of a labelled region inside its
-    chunk. Land and sea entries use a fixed centre-crop placeholder so that
-    they go through the same extraction path as the labelled classes."""
     if not c.HIGH_RES:
         print("high resolution setting must be activated for data segmentation")
         print("exiting program")
@@ -700,8 +741,6 @@ def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
                                            create_box_flag=True)))
 
     # #### 8.2 Compute global NDWI normalisation bounds
-    """0.4 * global_max brings the ceiling down so that water features are
-    better differentiated in the saved greyscale images."""
     valid_chunks = [chunk for chunk in index_chunks
                     if not np.all(np.isnan(chunk))]
     if valid_chunks:
@@ -713,10 +752,6 @@ def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
         print("WARNING: All NDWI chunks contained only NaN values.")
 
     # #### 8.3 Save PNG Training Images per Class
-    """One sub-folder per class is created inside labelling_path. Each
-    extracted NDWI patch is normalised to [0, 255] and saved as an 8-bit
-    greyscale PNG."""
-
     # --- class definitions ---
     all_coords = [
         (res_coords,  "reservoirs"),
