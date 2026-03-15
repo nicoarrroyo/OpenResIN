@@ -2,40 +2,47 @@ import numpy as np
 import random
 import math
 import config_NALIRA as c
+import user_interfacing as ui_do
 
 def pre_run_checks():
+    print("CONDUCTING PRE-RUN CHECKS")
+    
     if c.LABEL_DATA and not c.KNOWN_FEATURE_MASKING:
         print("WARNING: LABEL_DATA enabled with KNOWN_FEATURE_MASKING disabled")
-    
     if c.LABEL_DATA and not c.CLOUD_MASKING:
         print("WARNING: LABEL_DATA enabled with CLOUD_MASKING disabled")
     
     if c.CLOUD_MASKING and not c.HIGH_RES:
         print("WARNING: CLOUD_MASKING enabled with HIGH_RES disabled")
     
-    if c.CLOUD_MASKING:
-        try:
-            from omnicloudmask import predict_from_array
-            try: # check if omnicloudmask can be used
-                predict_from_array(
-                    np.random.rand(3, 32, 32).astype(np.float32), 
-                    patch_size=32, 
-                    patch_overlap=31,
-                    inference_device="cuda"
-                    )
-            except:
-                print("WARNING: CLOUD_MASKING enabled but no NVIDIA GPU found")
-                print("FIX: disable CLOUD_MASKING or $$$ sorry")
-        except:
-            print("WARNING: CLOUD_MASKING enabled but no ""OmniCloudMask "
-                  "module found")
-            print("FIX: disabled CLOUD_MASKING or install OmniCloudMask")
+    try:
+        import torch; import omnicloudmask
+        if torch.cuda.is_available():
+            ocm_available = True
+            cuda_available = True
+        del torch; del omnicloudmask
+    except:
+        import omnicloudmask
+        del omnicloudmask
+        print("WARNING: No CUDA support found")
+        ocm_available = True
+        cuda_available = False
+    finally:
+        print("WARNING: No OmniCloudMask library found")
+        ocm_available = False
+        cuda_available = False
+    if c.CLOUD_MASKING and not cuda_available:
+        print("WARNING: CLOUD_MASKING enabled but no CUDA support found")
+    if c.CLOUD_MASKING and not ocm_available:
+        print("WARNING: CLOUD_MASKING enabled but no OmniCloudMask library found")
     
     if c.LABEL_DATA and not c.HIGH_RES:
         print("WARNING: LABEL_DATA enabled with HIGH_RES disabled")
         print("Labelling images will be unclear")
         print("FIX: enable HIGH_RES for good labelling")
     
+    print("COMPLETED PRE-RUN CHECKS")
+    ui_do.confirm_continue_or_exit()
 
 def split_array(array, n_chunks):
     """
