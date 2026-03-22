@@ -11,197 +11,188 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sys
 import pandas as pd # Added for easier results handling
+import config_NALIRA as c
+import user_interfacing as ui_do
 
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.models import Sequential
 
-# %%% ii. Import Internal Functions
-# Make sure these files are accessible in your Python environment
-try:
-    from image_handling import image_to_array
-    from user_interfacing import start_spinner, end_spinner
-except ImportError:
-    print("Warning: Could not import 'image_handling' or 'user_interfacing'.")
-    print("Spinners will not be used, and test image visualization might fail.")
-    # Define dummy functions if modules are missing
-    def start_spinner(message=""): return None, None
-    def end_spinner(stop_event, thread): pass
-    def image_to_array(path): return None # Return None if function missing
-
 MAIN_START_TIME = time.monotonic()
 print("Imports complete.")
+
+folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
+folder = ui_do.list_folders(folders_path)[0]
 
 # %% 1. Configuration
 print("=== 1. Configuring Parameters ===")
 # --- Core Settings ---
-MODEL_TYPE = "ndwi" # Options: "ndwi", "tci" #
-BASE_PROJECT_DIR = os.path.join("C:\\", "Users", "nicol", "Documents", "UoM",
-                                "YEAR 3", "Individual Project", "data") # Adjust if needed
-SENTINEL_FOLDER = ("S2C_MSIL2A_20250301T111031_N0511_R137_T31UCU_"
-                   "20250301T152054.SAFE") # Adjust if needed
-DATA_BASE_PATH = os.path.join(BASE_PROJECT_DIR, "Sentinel 2",
-                              SENTINEL_FOLDER, "training data")
-DATA_DIR_NAME = MODEL_TYPE
+# =============================================================================
+# BASE_PROJECT_DIR = os.path.join("C:\\", "Users", "nicol", "Documents", "PAPER",
+#                                 "YEAR 3", "Individual Project", "data") # Adjust if needed
+# =============================================================================
+
+training_data_dir = os.path.join(c.DATA_DIR, "training-data")
+
+
+
+# =============================================================================
+# SENTINEL_FOLDER = ("S2C_MSIL2A_20250301T111031_N0511_R137_T31UCU_"
+#                    "20250301T152054.SAFE") # Adjust if needed
+# =============================================================================
+# =============================================================================
+# DATA_BASE_PATH = os.path.join(BASE_PROJECT_DIR, "Sentinel 2",
+#                               SENTINEL_FOLDER, "training data")
+# =============================================================================
 
 # --- Training Parameters ---
-# EPOCHS = 500 # Original single epoch setting - REMOVED #
 LEARNING_RATE = 0.001 # Adam optimizer default, but can be specified #
-EPOCH_SETTINGS = list(range(100, 171, 10)) # NEW: List of epochs to test
-NUM_REPEATS = 10 # NEW: Number of times to repeat training for each epoch setting
-
-# --- Output Settings ---
-# SAVE_MODEL = True # We won't save models during this experiment loop #
-# MODEL_SAVE_DIR = os.path.join(BASE_PROJECT_DIR, "saved_models") #
-# MODEL_FILENAME = f"{MODEL_TYPE} model epochs-{EPOCHS}.keras" #
+EPOCH_SETTINGS = list(range(100, 171, 10)) # List of epochs to test
+NUM_REPEATS = 10 # Number of times to repeat training for each epoch setting
 
 # --- Model Parameters ---
-DROPOUT_RATE = 0.2 #
+DROPOUT_RATE = 0.2
 
 # --- Test Image ---
-TEST_IMAGE_SUBDIR = MODEL_TYPE # Subdirectory within DATA_BASE_PATH #
-TEST_IMAGE_NAME = f"{MODEL_TYPE} chunk 1 reservoir 1.png" #
+# =============================================================================
+# TEST_IMAGE_SUBDIR = MODEL_TYPE # Subdirectory within DATA_BASE_PATH
+# =============================================================================
+# =============================================================================
+# TEST_IMAGE_NAME = f"{MODEL_TYPE} chunk 1 reservoir 1.png"
+# =============================================================================
 
 # --- Dataset Parameters ---
-# Adjusted IMG dimensions slightly, ensure they match your actual image sizes
-# If your images are truly 157x157, using 157/5 = 31.4 is problematic.
-# Using tf.image.resize during dataset loading might be better if sizes vary.
-# For now, assuming integer division was intended, but double-check this.
-IMG_HEIGHT = 31 # int(157/5) # must adjust this for the actual image size!!!! #
-IMG_WIDTH = 31 # int(157/5) #
-BATCH_SIZE = 32 #
-VALIDATION_SPLIT = 0.2 #
-RANDOM_SEED = 123 # For reproducibility of splits #
-print(f"Image size: ({IMG_HEIGHT}, {IMG_WIDTH})") #
+IMG_HEIGHT = 31 # int(157/5) # must adjust this for the actual image size!!!!
+IMG_WIDTH = 31 # int(157/5)
+BATCH_SIZE = 32
+VALIDATION_SPLIT = 0.2
+RANDOM_SEED = 123 # For reproducibility of splits
+
+print(f"Image size: ({IMG_HEIGHT}, {IMG_WIDTH})")
 print(f"Batch size: {BATCH_SIZE}") #
-print(f"Validation split: {VALIDATION_SPLIT}") #
+print(f"Validation split: {VALIDATION_SPLIT}")
 print(f"Epoch Settings: {EPOCH_SETTINGS}")
 print(f"Repeats per Setting: {NUM_REPEATS}")
 
 
 # %% 2. Prepare Paths and Directories
 print("=== 2. Preparing Paths ===")
-data_dir = os.path.join(DATA_BASE_PATH, DATA_DIR_NAME) #
-# model_save_path = os.path.join(MODEL_SAVE_DIR, MODEL_FILENAME) # Path for saving removed #
+data_dir = os.path.join(DATA_BASE_PATH, MODEL_TYPE)
 test_image_path = os.path.join(DATA_BASE_PATH, TEST_IMAGE_SUBDIR,
-                               TEST_IMAGE_NAME) #
+                               TEST_IMAGE_NAME)
 
-# Create output directories if they don't exist - Not needed as model saving is off
-# if SAVE_MODEL: #
-#     os.makedirs(MODEL_SAVE_DIR, exist_ok=True) #
-#     print("Model will be saved to nominal directory") #
 
 # --- Path Validation ---
-if not os.path.isdir(data_dir): #
-    print(f"Error: Data directory not found at {data_dir}") #
-    print("Please check the configuration for BASE_PROJECT_DIR, " #
-          "SENTINEL_FOLDER, and DATA_DIR_NAME.") #
-    sys.exit(1) #
+if not os.path.isdir(data_dir):
+    print(f"Error: Data directory not found at {data_dir}")
+    print("Please check the configuration for BASE_PROJECT_DIR, "
+          "SENTINEL_FOLDER, and DATA_DIR_NAME.")
+    sys.exit(1)
 else:
-    print("Using nominal data directory.") #
+    print("Using nominal data directory.")
 
-if not os.path.exists(test_image_path): #
-    print(f"WARNING: Test image not found at {test_image_path}. Prediction " #
-           "step will be skipped.") #
+if not os.path.exists(test_image_path):
+    print(f"WARNING: Test image not found at {test_image_path}. Prediction "
+           "step will be skipped.")
 else:
-    print(f"Using nominal test image: {TEST_IMAGE_NAME}") #
+    print(f"Using nominal test image: {TEST_IMAGE_NAME}")
 
-data_dir_pathlib = pathlib.Path(data_dir) #
+data_dir_pathlib = pathlib.Path(data_dir)
 try:
-    image_count = len(list(data_dir_pathlib.glob('*/*.png'))) #
-    print(f"Found {image_count} images in nominal data directory.") #
-    if image_count == 0: #
-        print("WARNING: No images found. Check the data directory structure " #
-              "and image format.") #
-except Exception as e: #
-    print(f"Error counting images: {e}") #
-    image_count = 0 # Assume zero if listing fails #
+    image_count = len(list(data_dir_pathlib.glob('*/*.png')))
+    print(f"Found {image_count} images in nominal data directory.")
+    if image_count == 0:
+        print("WARNING: No images found. Check the data directory structure "
+              "and image format.")
+except Exception as e:
+    print(f"Error counting images: {e}")
+    image_count = 0 # Assume zero if listing fails
 
-if image_count < BATCH_SIZE: #
-    print(f"WARNING: Total image count ({image_count}) is less than the batch " #
-           f"size ({BATCH_SIZE}). This might cause issues during training.") #
+if image_count < BATCH_SIZE:
+    print(f"WARNING: Total image count ({image_count}) is less than the batch "
+           f"size ({BATCH_SIZE}). This might cause issues during training.")
 
 # %% 3. Prepare the Dataset (Done ONCE)
 print("=== 3. Loading and Preparing Dataset ===")
 # Load data using a Keras utility - This only needs to be done once
 try:
-    train_ds = tf.keras.utils.image_dataset_from_directory( #
-      data_dir_pathlib, #
-      validation_split=VALIDATION_SPLIT, #
-      subset="training", #
-      seed=RANDOM_SEED, #
-      image_size=(IMG_HEIGHT, IMG_WIDTH), #
-      batch_size=BATCH_SIZE) #
+    train_ds = tf.keras.utils.image_dataset_from_directory(
+      data_dir_pathlib,
+      validation_split=VALIDATION_SPLIT,
+      subset="training",
+      seed=RANDOM_SEED,
+      image_size=(IMG_HEIGHT, IMG_WIDTH),
+      batch_size=BATCH_SIZE)
 
-    val_ds = tf.keras.utils.image_dataset_from_directory( #
-      data_dir_pathlib, #
-      validation_split=VALIDATION_SPLIT, #
-      subset="validation", #
-      seed=RANDOM_SEED, #
-      image_size=(IMG_HEIGHT, IMG_WIDTH), #
-      batch_size=BATCH_SIZE) #
-except Exception as e: #
-    print(f"Error loading dataset: {e}") #
-    print("Check if the directory structure matches " #
-          "'data_dir/class_a/image.png', 'data_dir/class_b/image.png'.") #
-    sys.exit(1) #
+    val_ds = tf.keras.utils.image_dataset_from_directory(
+      data_dir_pathlib,
+      validation_split=VALIDATION_SPLIT,
+      subset="validation",
+      seed=RANDOM_SEED,
+      image_size=(IMG_HEIGHT, IMG_WIDTH),
+      batch_size=BATCH_SIZE)
+except Exception as e:
+    print(f"Error loading dataset: {e}")
+    print("Check if the directory structure matches "
+          "'data_dir/class_a/image.png', 'data_dir/class_b/image.png'.")
+    sys.exit(1)
 
-class_names = train_ds.class_names #
-num_classes = len(class_names) #
-print(f"Found classes: {class_names}") #
-if num_classes <= 1: #
-    print("Error: Need at least two classes for classification.") #
-    sys.exit(1) #
+class_names = train_ds.class_names
+num_classes = len(class_names)
+print(f"Found classes: {class_names}")
+if num_classes <= 1:
+    print("Error: Need at least two classes for classification.")
+    sys.exit(1)
 
 # Configure the dataset for performance
-stop_event, thread = start_spinner(message="Configuring dataset performance") #
-AUTOTUNE = tf.data.AUTOTUNE #
-SHUFFLE_BUFFER_SIZE = max(1000, image_count) # Adjust buffer size based on image count #
+print("configuring dataset performance")
+AUTOTUNE = tf.data.AUTOTUNE
+SHUFFLE_BUFFER_SIZE = max(1000, image_count) # Adjust buffer size based on image count
 
 # Cache, shuffle, prefetch the datasets - done once
-train_ds = train_ds.cache().shuffle(buffer_size=SHUFFLE_BUFFER_SIZE, seed=RANDOM_SEED).prefetch(buffer_size=AUTOTUNE) #
-val_ds = val_ds.cache().prefetch(buffer_size=AUTOTUNE) #
+train_ds = train_ds.cache().shuffle(buffer_size=SHUFFLE_BUFFER_SIZE, seed=RANDOM_SEED).prefetch(buffer_size=AUTOTUNE)
+val_ds = val_ds.cache().prefetch(buffer_size=AUTOTUNE)
 
-end_spinner(stop_event, thread) #
+print("complete!")
 
 # %% 4. Define Model Building Function
 print("=== 4. Defining Model Building Function ===")
 
 # Data augmentation layers (defined once)
-data_augmentation = keras.Sequential( #
+data_augmentation = keras.Sequential(
   [
-    layers.RandomFlip("horizontal", input_shape=(IMG_HEIGHT, IMG_WIDTH, 3)), #
-    layers.RandomRotation(0.1), #
-    layers.RandomZoom(0.1), #
+    layers.RandomFlip("horizontal", input_shape=(IMG_HEIGHT, IMG_WIDTH, 3)),
+    layers.RandomRotation(0.1),
+    layers.RandomZoom(0.1),
   ],
-  name="data_augmentation", #
+  name="data_augmentation",
 )
 
 # --- NEW: Function to build and compile a fresh model ---
 def build_compile_model(num_classes, learning_rate, dropout_rate):
     """Builds and compiles a new instance of the CNN model."""
-    model = Sequential([ #
+    model = Sequential([
       data_augmentation, # Apply data augmentation as the first layer
       layers.Rescaling(1./255), # Rescale pixel values
-      # Conv Blocks #
-      layers.Conv2D(16, kernel_size=3, padding='same', activation='relu'), #
-      layers.MaxPooling2D(), #
-      layers.Conv2D(32, kernel_size=3, padding='same', activation='relu'), #
-      layers.MaxPooling2D(), #
-      layers.Conv2D(64, kernel_size=3, padding='same', activation='relu'), #
-      layers.MaxPooling2D(), #
-      # Dropout and Dense Layers #
+      # Conv Blocks
+      layers.Conv2D(16, kernel_size=3, padding='same', activation='relu'),
+      layers.MaxPooling2D(),
+      layers.Conv2D(32, kernel_size=3, padding='same', activation='relu'),
+      layers.MaxPooling2D(),
+      layers.Conv2D(64, kernel_size=3, padding='same', activation='relu'),
+      layers.MaxPooling2D(),
+      # Dropout and Dense Layers
       layers.Dropout(dropout_rate), # Use passed dropout rate
-      layers.Flatten(), #
-      layers.Dense(128, activation='relu'), #
+      layers.Flatten(),
+      layers.Dense(128, activation='relu'),
       layers.Dense(num_classes, name="outputs") # Output layer (logits)
-    ], name=f"{MODEL_TYPE}_classifier_{int(time.time())}") # Add timestamp for unique name #
+    ], name=f"{MODEL_TYPE}_classifier_{int(time.time())}") # Add timestamp for unique name
 
-    # Compile the model #
+    # Compile the model
     model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate), # Use passed LR
-                  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True), #
-                  metrics=['accuracy']) #
+                  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                  metrics=['accuracy'])
     return model
 
 # %% 5. Training Loop Experiment
@@ -362,39 +353,39 @@ print("=== 7. Predicting on New Data (Using Last Model) ===")
 # retrain a model with the optimal epoch setting found, or save models during the loop.
 
 if 'model' in locals() and model is not None: # Check if model exists
-    if os.path.exists(test_image_path): #
-        print(f"Loading test image: {TEST_IMAGE_NAME}") #
+    if os.path.exists(test_image_path):
+        print(f"Loading test image: {TEST_IMAGE_NAME}")
         # (Visualization code omitted for brevity - kept from original if desired)
 
         try:
-            img = tf.keras.utils.load_img( #
-                test_image_path, target_size=(IMG_HEIGHT, IMG_WIDTH) #
+            img = tf.keras.utils.load_img(
+                test_image_path, target_size=(IMG_HEIGHT, IMG_WIDTH)
             )
-            img_array = tf.keras.utils.img_to_array(img) #
-            img_array = tf.expand_dims(img_array, 0) # Create a batch #
+            img_array = tf.keras.utils.img_to_array(img)
+            img_array = tf.expand_dims(img_array, 0) # Create a batch
 
-            predictions = model.predict(img_array) #
-            score = tf.nn.softmax(predictions[0]) #
+            predictions = model.predict(img_array)
+            score = tf.nn.softmax(predictions[0])
 
-            predicted_class_index = np.argmax(score) #
-            predicted_class_name = class_names[predicted_class_index] #
-            confidence = 100 * np.max(score) #
+            predicted_class_index = np.argmax(score)
+            predicted_class_name = class_names[predicted_class_index]
+            confidence = 100 * np.max(score)
 
-            print( #
-                "Prediction: This image most likely belongs to " #
-                f"'{predicted_class_name}' " #
-                f"with a {confidence:.2f}% confidence." #
+            print(
+                "Prediction: This image most likely belongs to "
+                f"'{predicted_class_name}' "
+                f"with a {confidence:.2f}% confidence."
             )
-            # Optional: Add success/failure check based on name #
+            # Optional: Add success/failure check based on name
 
-        except FileNotFoundError: #
-            print(f"Error: Test image file not found at {TEST_IMAGE_NAME}") #
-        except Exception as e: #
-            print(f"An error occurred during prediction: {e}") #
+        except FileNotFoundError:
+            print(f"Error: Test image file not found at {TEST_IMAGE_NAME}")
+        except Exception as e:
+            print(f"An error occurred during prediction: {e}")
 
     else:
-        print("Skipping prediction because test image was not found at: " #
-              f"{TEST_IMAGE_NAME}") #
+        print("Skipping prediction because test image was not found at: "
+              f"{TEST_IMAGE_NAME}")
 else:
     print("Skipping prediction as no model was successfully trained in the last iteration.")
 
@@ -406,6 +397,6 @@ print("=== 8. Saving Model (Disabled for this experiment) ===")
 
 # %% 9. Final Summary
 print("=== 9. Script End ===")
-TOTAL_TIME = time.monotonic() - MAIN_START_TIME #
-print(f"Total processing time: {TOTAL_TIME:.2f} seconds") #
-print("================") #
+TOTAL_TIME = time.monotonic() - MAIN_START_TIME
+print(f"Total processing time: {TOTAL_TIME:.2f} seconds")
+print("================")
