@@ -15,7 +15,7 @@ import image_handling as image_do
 import misc
 import user_interfacing as ui_do
 
-import config_NALIRA as c
+import nalira_config as c
 
 # %% 1. Creating image arrays (iterative)
 def one_create_image_arrays(folders_path, folder, tci_60_array):
@@ -39,7 +39,6 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
         list: Contains [image_arrays, image_metadata, 
                         images_path, tci_array, tci_60_array].
     """
-    import rasterio
     print(f"step 1 beginning at {dt.datetime.now().time():%H:%M:%S}")
     
     # 1.1 Establishing Paths
@@ -73,13 +72,17 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
             )
     
     # 1.2.1 Opening and Converting Band Images
-    try:
-        with rasterio.open(file_paths[0]) as src:
-            image_metadata = src.meta.copy()
-    except Exception as e:
-        print("failed raster metadata pull")
-        print("error: ", e)
-        ui_do.confirm_continue_or_exit()
+    image_metadata = "TEMPORARY VALUE"
+    if c.KNOWN_FEATURE_MASKING:
+        import rasterio
+        try:
+            with rasterio.open(file_paths[0]) as src:
+                image_metadata = src.meta.copy()
+        except Exception as e:
+            print("failed raster metadata pull")
+            print("error: ", e)
+            ui_do.confirm_continue_or_exit()
+    
     
     print(f"opening {c.RES} resolution band images")
     image_arrays = image_do.image_to_array(file_paths)
@@ -385,6 +388,8 @@ def six_prepare_data(folders, prefix):
         paths, correction flags, and invalid rows required for the labelling 
         loop.
     """
+    print(f"step 6 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    
     # 6.1 Preparing File for Labelling
     break_flag = False
     
@@ -492,8 +497,9 @@ def six_prepare_data(folders, prefix):
             invalid_rows, lines, last_chunk, labelling_path]
 
 # %% 7. Data labelling
-def seven_label_data(i, ndwi_mean, tci_array, tci_60_array, data_file_path, 
-                     data_correction, invalid_rows, lines, last_chunk):
+def seven_label_data(LP_MODE, i, ndwi_mean, tci_array, tci_60_array, 
+                     data_file_path, data_correction, invalid_rows, lines, 
+                     last_chunk):
     """
     Provides an interactive GUI loop for users to label regions of interest 
     (ROIs) within image chunks.
@@ -526,10 +532,10 @@ def seven_label_data(i, ndwi_mean, tci_array, tci_60_array, data_file_path,
     break_flag = False
     
     # 7.1 Creating Chunks from Satellite Imagery
-    print(f"step 6 beginning at {dt.datetime.now().time():%H:%M:%S}")
-    print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
-    index_chunks = misc.split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
-    tci_chunks = misc.split_array(array=tci_array, n_chunks=c.N_CHUNKS)
+    if not LP_MODE:
+        print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
+        index_chunks = misc.split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
+        tci_chunks = misc.split_array(array=tci_array, n_chunks=c.N_CHUNKS)
     
     # #### 7.2 Outputting Images
     print("outputting images...")
