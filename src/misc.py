@@ -1,48 +1,106 @@
 import numpy as np
 import random
 import math
-import config_NALIRA as c
-import user_interfacing as ui_do
+import nalira_config as c
 
 def pre_run_checks():
     print("CONDUCTING PRE-RUN CHECKS")
     
-    if c.LABEL_DATA and not c.KNOWN_FEATURE_MASKING:
-        print("WARNING: LABEL_DATA enabled with KNOWN_FEATURE_MASKING disabled")
-    if c.LABEL_DATA and not c.CLOUD_MASKING:
-        print("WARNING: LABEL_DATA enabled with CLOUD_MASKING disabled")
-    
-    if c.CLOUD_MASKING and not c.HIGH_RES:
-        print("WARNING: CLOUD_MASKING enabled with HIGH_RES disabled")
-    
+    # ==== check if low-power mode is necessary ====
     try:
         import torch; import omnicloudmask
         if torch.cuda.is_available():
             ocm_available = True
             cuda_available = True
         del torch; del omnicloudmask
+        LP_MODE = False
     except:
+        cuda_available = False
         import omnicloudmask
         del omnicloudmask
         print("WARNING: No CUDA support found")
         ocm_available = True
-        cuda_available = False
+        LP_MODE = True
     finally:
         print("WARNING: No OmniCloudMask library found")
         ocm_available = False
         cuda_available = False
+        LP_MODE = True
+    
+    # ==== STEP ONE CHECK ====
+    one_pass        = True  # creating image arrays
+    if not one_pass:
+        print("STEP ONE (IMAGE ARRAY CONVERSION) WILL LIKELY FAIL")
+    
+    # ==== STEP TWO CHECK ====
+    two_pass        = True  # known feature masking
+    try:
+        import rasterio
+        import geopandas
+        import fiona
+        del rasterio; del geopandas; del fiona;
+    except:
+        if c.KNOWN_FEATURE_MASKING:
+            print("WARNING: Missing libraries (rasterio, geopandas, or fiona)")
+            print("-> These libraries are necessary for KNOWN_FEATURE_MASKING")
+            two_pass = False
+    
+    if not two_pass:
+        print("STEP 2 (KNOWN FEATURE MASKING) WILL LIKELY FAIL")
+    
+    # ==== STEP THREE CHECK ====
+    three_pass      = True  # cloud masking (omnicloudmask)
+    
     if c.CLOUD_MASKING and not cuda_available:
         print("WARNING: CLOUD_MASKING enabled but no CUDA support found")
     if c.CLOUD_MASKING and not ocm_available:
         print("WARNING: CLOUD_MASKING enabled but no OmniCloudMask library found")
     
+    if c.CLOUD_MASKING and not c.HIGH_RES:
+        print("WARNING: CLOUD_MASKING enabled with HIGH_RES disabled")
+    
+    if not three_pass:
+        print("STEP 3 (CLOUD MASKING) WILL LIKELY FAIL")
+    
+    # ==== STEP FOUR CHECK ====
+    four_pass       = True  # index calculation
+    if not four_pass:
+        print("STEP 4 (INDEX CALCULATION) WILL LIKELY FAIL")
+    
+    # ==== STEP FIVE CHECK ====
+    five_pass       = True  # chunkification
+    if not five_pass:
+        print("STEP 5 (CHUNK SEPARATION) WILL LIKELY FAIL")
+    
+    # ==== STEP SIX CHECK ====
+    six_pass        = True  # data validation
+    if not six_pass:
+        print("STEP 6 (DATA VERIFICATION) WILL LIKELY FAIL")
+    
+    # ==== STEP SEVEN CHECK ====
+    seven_pass      = True  # data labelling
+    
     if c.LABEL_DATA and not c.HIGH_RES:
         print("WARNING: LABEL_DATA enabled with HIGH_RES disabled")
-        print("Labelling images will be unclear")
+        print("-> Labelling images will be unclear")
         print("FIX: enable HIGH_RES for good labelling")
     
+    if c.LABEL_DATA and not c.KNOWN_FEATURE_MASKING:
+        print("WARNING: LABEL_DATA enabled with KNOWN_FEATURE_MASKING disabled")
+    if c.LABEL_DATA and not c.CLOUD_MASKING:
+        print("WARNING: LABEL_DATA enabled with CLOUD_MASKING disabled")
+    
+    if not seven_pass:
+        print("STEP 7 (DATA LABELLING) WILL LIKELY FAIL")
+    
+    # ==== STEP EIGHT CHECK ====
+    eight_pass      = True  # data segmentation
+    
+    if not eight_pass:
+        print("STEP 8 (DATA SEGMENTATION) WILL LIKELY FAIL")
+    
     print("COMPLETED PRE-RUN CHECKS")
-    ui_do.confirm_continue_or_exit()
+    return LP_MODE
 
 def split_array(array, n_chunks):
     """

@@ -6,7 +6,7 @@ import tkinter as tk
 import numpy as np
 import os
 from collections import defaultdict
-import config_NALIRA as c
+import nalira_config as c
 
 def table_print(**kwargs):
     """
