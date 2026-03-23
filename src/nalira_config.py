@@ -1,12 +1,13 @@
 import os
 
 # -- Processing Settings --
+LP_MODE                 = False     # low-power mode (changes order of operations)
 N_CHUNKS                = 5000      # number of chunks into which images are split
-HIGH_RES                = True     # use finer 10m spatial resolution (slower)
+HIGH_RES                = False     # use finer 10m spatial resolution (slower)
 RES = "10m" if HIGH_RES else "60m"
 KNOWN_FEATURE_MASKING   = False
 CLOUD_MASKING           = False
-COMPOSITING             = False
+COMPOSITING             = True
 SHOW_INDEX_PLOTS        = True
 SAVE_IMAGES             = False
 LABEL_DATA              = True
@@ -17,7 +18,7 @@ TITLE_SIZE              = 5         # title size of plots
 PLOT_SIZE               = (3, 3)    # larger plots increase detail and pixel count
 PLOT_SIZE_CHUNKS        = (4, 4)
 
-N_IMAGES                = 1         # number of the found images to use (-1 for all)
+N_IMAGES                = -1         # number of the found images to use (-1 for all)
 
 # -- Paths --
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))

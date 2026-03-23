@@ -53,11 +53,11 @@ Outputs:
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__))) # fix working directory
 import numpy as np
-import pipeline_operations as operation
+import nalira_operations as operation
 import user_interfacing as ui_do
 from misc import pre_run_checks
 
-import config_NALIRA as c
+import nalira_config as c
 
 ui_do.table_print(
     n_chunks=c.N_CHUNKS, n_images=c.N_IMAGES, high_res=c.HIGH_RES, 
@@ -74,8 +74,15 @@ tci_array = np.empty([1,1]); tci_60_array = np.empty([1,1])
 folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
 folders = ui_do.list_folders(folders_path)
 
-pre_run_checks()
-
+LP_MODE = pre_run_checks()
+if LP_MODE:
+    print("Suggesting to use low-power NALIRA variant")
+    print("Expensive operations like cloud masking and percentile calculations"
+          " will be carried out on a chunk-by-chunk basis. The data will not "
+          "segmented but responses will be saved.")
+    ui_do.confirm_continue_or_exit()
+else:
+    ui_do.confirm_continue_or_exit()
     # %% 1. Create Image Arrays
 for folder_num, folder in enumerate(folders):
     print("\n===============")
@@ -110,7 +117,7 @@ for folder_num, folder in enumerate(folders):
     print("----------")
     print("| STEP 3 |")
     print("----------")
-    if c.CLOUD_MASKING:
+    if c.CLOUD_MASKING and not LP_MODE:
         image_arrays = operation.three_mask_clouds(image_arrays)
     else:
         print("skipping cloud masking")
@@ -119,21 +126,22 @@ for folder_num, folder in enumerate(folders):
     print("----------")
     print("| STEP 4 |")
     print("----------")
-    indices = operation.four_compute_indices(image_arrays)
-    for key in index_arrays:
-        index_arrays[key].append(indices[key])
+    if not LP_MODE:
+        indices = operation.four_compute_indices(image_arrays)
+        for key in index_arrays:
+            index_arrays[key].append(indices[key])
 
 # %% 5. Composite Images (and plot)
 print("----------")
 print("| STEP 5 |")
 print("----------")
-if c.COMPOSITING:
+if c.COMPOSITING and not LP_MODE:
     stms = operation.five_composite(index_arrays)
     ndwi_mean = stms["ndwi"]["median"] # temporary. will replace with full stm
-else:
+elif not c.COMPOSITING and not LP_MODE:
     ndwi_mean = operation.five_mean(index_arrays)["ndwi"]
 
-if c.SHOW_INDEX_PLOTS:
+if c.SHOW_INDEX_PLOTS and not LP_MODE:
     operation.fiveb_plot(ndwi_mean, folders_path)
 else:
     print("skipping water index image display")
@@ -164,16 +172,17 @@ print("| STEP 7 |")
 print("----------")
 if c.LABEL_DATA:
     index_chunks = operation.seven_label_data(
-         i, 
-         ndwi_mean, 
-         tci_array, 
-         tci_60_array, 
-         data_file_path, 
-         data_correction, 
-         invalid_rows, 
-         lines, 
-         last_chunk
-         )
+        LP_MODE,
+        i, 
+        ndwi_mean, 
+        tci_array, 
+        tci_60_array, 
+        data_file_path, 
+        data_correction, 
+        invalid_rows, 
+        lines, 
+        last_chunk
+        )
 else:
     print("skipping data labelling")
 
@@ -181,8 +190,9 @@ else:
 print("----------")
 print("| STEP 8 |")
 print("----------")
-operation.eight_segment_data(
-    data_file_path, 
-    index_chunks, 
-    labelling_path, 
-    prefix)
+if not LP_MODE:
+    operation.eight_segment_data(
+        data_file_path, 
+        index_chunks, 
+        labelling_path, 
+        prefix)
