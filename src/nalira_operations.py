@@ -4,6 +4,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import csv
 import datetime as dt
 import sys
+import time
 
 # %% Common Third Party Libraries
 import numpy as np
@@ -98,8 +99,8 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
         tci_file_name = prefix + f"_TCI_{c.RES}.jp2"
         tci_array = image_do.image_to_array(os.path.join(tci_path, tci_file_name))
         
-        tci_60_path = os.path.join(images_path, "R60m")
-        tci_60_file_name = prefix + "_TCI_60m.jp2"
+        tci_60_path = os.path.join(images_path, f"R{c.RES}")
+        tci_60_file_name = prefix + f"_TCI_{c.RES}.jp2"
         with Image.open(os.path.join(tci_60_path, tci_60_file_name)) as img:
             size = (img.width//10, img.height//10)
             tci_60_array = np.array(img.resize(size))
@@ -211,7 +212,9 @@ def two_mask_known_feature(image_arrays, image_metadata):
     return image_arrays
 
 # %% 3. Masking out clouds (OmniCloudMask) (iterative)
-def three_mask_clouds(image_arrays):
+def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300, 
+                      batch_size=4, inference_device="cuda", 
+                      inference_dtype="bf16"):
     
     from omnicloudmask import predict_from_array
     if not c.HIGH_RES:
@@ -231,17 +234,18 @@ def three_mask_clouds(image_arrays):
     try:
         pred_mask_2d = predict_from_array(
             input_array, 
-            inference_dtype="bf16",
-            batch_size=4,
-            mosaic_device="cuda"
+            inference_dtype=inference_dtype,
+            batch_size=batch_size,
+            inference_device=inference_device
             )[0]
+        predict_from_array
     except Exception as e:
         print(f"FAILURE: call to CUDA (due to error: {e})")
         print("TRYING: use CPU for inference (slower)")
         ui_do.confirm_continue_or_exit()
         pred_mask_2d = predict_from_array(
             input_array, 
-            mosaic_device="cpu")[0]
+            inference_device="cpu")[0]
     
     combined_mask = (
         (pred_mask_2d == 1) | 
@@ -291,19 +295,9 @@ def five_composite(index_arrays):
     print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
     # start by checking for cuda install
     try:
-        import cupy; x = 2; cupy.sin(x);
-        os.environ["CUDA_HOME"] = ("C:/Program Files/"
-                                   "NVIDIA GPU Computing Toolkit/CUDA/v13.2")
+        import cupy; del cupy;
         use_cuda = True
     except:
-        print("FAILURE: could not find CUDA drivers") # known limitation
-        print("TRYING: will use CPU for STM stacking")
-        if c.HIGH_RES:
-            print("NOTE: Using the CPU is prohibitively slow for high "
-                  "resolution stacking; unfortunately, it is strongly "
-                  "recommended to use a discrete GPU from NVIDIA with the cupy"
-                  " library for best performance.")
-            ui_do.confirm_continue_or_exit()
         use_cuda = False
     
     print("compositing all images together")
@@ -312,8 +306,10 @@ def five_composite(index_arrays):
     for index_name, arrays_list in index_arrays.items():
         shapes = [a.shape for a in arrays_list]
         if len(set(shapes)) > 1:
-            print(f"FAILURE: shape mismatch in {index_name} arrays: {shapes}")
-            print("TRYING: skip this index")
+            ui_do.alert_user(
+                warning=f"Shape mismatch in {index_name} arrays: {shapes}", 
+                consequence="Image compositing will fail for this index", 
+                solution="Skipping this index (check your array dimensions)")
             continue
         
         stack = np.stack(arrays_list)
@@ -356,13 +352,13 @@ def five_mean(index_arrays):
     print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return mean
 
-def fiveb_plot(ndwi_mean, folder_path):
+def fiveb_plot(labelling_array, folder_path):
     if c.SAVE_IMAGES:
         print(f"step 5b beginning at {dt.datetime.now().time():%H:%M:%S}")
         print("saving and displaying water index images")
     else:
         print("displaying water index images")
-    image_do.plot_indices(ndwi_mean, c.PLOT_SIZE, c.SAVE_IMAGES, 
+    image_do.plot_indices(labelling_array, c.PLOT_SIZE, c.SAVE_IMAGES, 
                           folder_path, c.RES)
     print(f"step 5b complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return
@@ -496,8 +492,70 @@ def six_prepare_data(folders, prefix):
     return [break_flag, i, data_file_path, data_correction, 
             invalid_rows, lines, last_chunk, labelling_path]
 
+# %%
+def lp_chunk_processing(img_chunks_list, i):
+    """
+    Processes one element of a numpy array (according to NALIRA pipeline).
+    
+    Takes a list of a list of numpy arrays, each item in the list being one 
+    array for each band of a Sentinel 2 image, and returns a single array with 
+    one of the elements (a single chunk) having undergone cloud-masking, index 
+    calculation, and STM compositing. This is equivalent to applying the 
+    regular NALIRA workflow on a single chunk, rather than applying it to an 
+    entire array. 
+    
+    Parameters
+    ----------
+    img_chunks_list : list of lists of a numpy arrays (a mess)
+        It's a mess. Suppose we have two images. img_chunks_list has two items. 
+        Each item is a list with three items. Each of those items is a list, 
+        representing the bands green, nir, red, with 4900 items each. Each of 
+        THOSE items is a numpy array representing a single chunk of a single 
+        band of a single image. 
+    i : int
+        Counter for what chunk we're on.
+    
+    Returns
+    -------
+    labelling_array : numpy array (double check?)
+        Input into the rest of step 7.
+    
+    """
+    print(f"processing chunk {i}")
+    start_time = time.monotonic()
+    
+    indices_per_chunk = []
+    index_arrays_per_chunk = {"ndwi": [], "ndvi": []}
+    
+    # chunk_stms = {"ndwi": []}
+    
+    for img_chunks in img_chunks_list:
+        # --- cloud masking --- #
+        this_chunk = [img_chunks[band][i] for band in range(len(img_chunks))]
+        masked_chunk = three_mask_clouds(this_chunk)
+        print("cloud masking complete")
+        
+        # --- spectral index calculation --- #
+        indices_per_chunk.append(four_compute_indices(masked_chunk))
+	
+    for index_array_per_chunk in index_arrays_per_chunk:
+        for key in index_array_per_chunk:
+            index_array_per_chunk[key].append(indices_per_chunk[key])
+    
+    # --- spectral temporal metrics --- #
+    if c.COMPOSITING:
+        index_stms_per_chunk = five_composite(index_arrays_per_chunk)
+        labelling_array = index_stms_per_chunk["ndwi"]["median"] # TODO replace with stm
+    elif not c.COMPOSITING:
+        labelling_array = five_mean(index_arrays_per_chunk)["ndwi"]
+	
+    time_taken = round(time.monotonic() - start_time, 1)
+    print(f"STM stacking complete! finished at {time_taken}")
+    
+    return labelling_array
+
 # %% 7. Data labelling
-def seven_label_data(LP_MODE, i, ndwi_mean, tci_array, tci_60_array, 
+def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array, 
                      data_file_path, data_correction, invalid_rows, lines, 
                      last_chunk):
     """
@@ -510,20 +568,34 @@ def seven_label_data(LP_MODE, i, ndwi_mean, tci_array, tci_60_array,
     regular inputs, navigation commands ('back', 'break'), and saves the 
     extracted coordinates to the CSV file.
     
-    Args:
-        i (int): The current chunk index.
-        ndwi_mean (np.ndarray): The processed NDWI array.
-        tci_array (np.ndarray): The True Colour Image array.
-        tci_60_array (np.ndarray): The resized 60m TCI array for context.
-        data_file_path (str): Path to the labelling CSV file.
-        data_correction (bool): Flag indicating if the user is correcting 
-        incomplete data.
-        invalid_rows (list): List of row indices that require data correction.
-        lines (list): The current lines of the CSV file.
-        last_chunk (int): The integer index of the final chunk.
-        
-    Returns:
-        list: The generated list of split NDWI chunks.
+    Parameters
+    ----------
+    LP_MODE : bool
+        Flag for switching to low-power mode of NALIRA (chunk-wise operations).
+    i : int
+        The current chunk index.
+    labelling_array : np.ndarray or list of np.ndarray
+        The processed STM/NDWI array or a list of unprocessed arrays (for LP).
+    tci_array : np.ndarray
+        The True Colour Image array.
+    tci_60_array : np.ndarray
+        The resized 60m TCI array for context.
+    data_file_path : str
+        Path to the labelling CSV file.
+    data_correction : bool
+        Flag indicating if the user is correcting incomplete data.
+    invalid_rows : list
+        List of row indices that require data correction.
+    lines : The current lines of the CSV file
+        DESCRIPTION.
+    last_chunk : int
+        The integer index of the final chunk.
+    
+    Returns
+    -------
+    index_chunks : list
+        The generated list of split NDWI chunks.
+    
     """
     
     # ### 7. Data Labelling
@@ -531,21 +603,32 @@ def seven_label_data(LP_MODE, i, ndwi_mean, tci_array, tci_60_array,
     print("data labelling start")
     break_flag = False
     
-    # 7.1 Creating Chunks from Satellite Imagery
+    # #### 7.1 Creating Chunks from Satellite Imagery
+    print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
     if not LP_MODE:
-        print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
-        index_chunks = misc.split_array(array=ndwi_mean, n_chunks=c.N_CHUNKS)
+        index_chunks = misc.split_array(array=labelling_array, n_chunks=c.N_CHUNKS)
         tci_chunks = misc.split_array(array=tci_array, n_chunks=c.N_CHUNKS)
+    elif LP_MODE:
+        img_chunks_list = [] # will be shape: [n_images][n_bands][n_chunks][h][w]
+        for img in labelling_array:
+            img_chunks_list_band = []
+            for band in img:
+                img_chunks_list_band.append(misc.split_array(array=band, n_chunks=c.N_CHUNKS))
+            img_chunks_list.append(img_chunks_list_band)
     
     # #### 7.2 Outputting Images
-    print("outputting images...")
+    print("outputting images")
     invalid_rows_index = 0
     
-    while i < len(index_chunks):
+    while i < round(np.floor(np.sqrt(c.N_CHUNKS)))**2: # 4900 for N_CHUNKS=5000
         if break_flag:
             break
-        image_do.plot_chunks(ndwi_mean, index_chunks, c.PLOT_SIZE_CHUNKS, i, 
-                    tci_chunks, tci_60_array)
+        
+        if LP_MODE:
+            labelling_array = lp_chunk_processing(img_chunks_list, i)
+        
+        image_do.plot_chunks(labelling_array, index_chunks, c.PLOT_SIZE_CHUNKS, 
+                             i, tci_chunks, tci_60_array, LP_MODE)
         max_index = [0, 0]
         max_index[0] = round(np.nanmax(index_chunks[i]), 2)
         print(f"MAX ADJUSTED NDWI: {max_index[0]}", end=" | ")
