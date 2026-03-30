@@ -12,14 +12,10 @@ machines without discrete GPUs (e.g. laptops) can run the data labelling
 portion of NALIRA without holding entire processed images in memory.
 """
 
-
 import numpy as np
 import omnicloudmask as ocm
-import torch
 import time
 import matplotlib.pyplot as plt
-
-torch.set_num_threads(12) # number of threads on dell xps 9315
 
 def split_array(array, n_chunks):
     rows = np.array_split(array, np.sqrt(n_chunks))#, axis=0) # split into rows
@@ -31,9 +27,10 @@ def split_array(array, n_chunks):
 # %% create image array(s)
 start_time = time.monotonic()
 
-img1 = np.random.rand(3, 11000, 11000).astype(np.float32)
-img2 = np.random.rand(3, 11000, 11000).astype(np.float32)
-img2_60 = np.random.rand(3, 2000, 2000).astype(np.float32)
+img_size = 5490
+img1 = np.random.rand(3, img_size, img_size).astype(np.float32)
+img2 = np.random.rand(3, img_size, img_size).astype(np.float32)
+img2_60 = np.random.rand(3, round(img_size/6), round(img_size/6)).astype(np.float32)
 img_list = [img1, img2]
 
 print(f"step 1 complete: {round(time.monotonic()-start_time,2)}")
@@ -55,7 +52,7 @@ start_time = time.monotonic()
 
 np.seterr(divide="ignore", invalid="ignore")
 i = 0
-while i < 5:
+while i < 2:
     ndwi_per_chunk = []
     ndvi_per_chunk = []
     
@@ -81,7 +78,7 @@ while i < 5:
         # ==== mask clouds ==== #
         pred_mask_2d = ocm.predict_from_array(
             img_chunk_stack, 
-            patch_size=157, patch_overlap=64, 
+            patch_size=75, patch_overlap=64, 
             inference_device="cpu", inference_dtype="fp32"
             )[0]
         
@@ -131,3 +128,71 @@ while i < 5:
     
 
 print(f"step 3 complete: {round(time.monotonic()-start_time,2)}")
+
+"""
+if LP_MODE:
+            labelling_array = lp_chunk_processing(labelling_array, i)
+            ndwi_per_chunk = []; chunk_stms = { "ndwi": [], "ndvi": [] };
+            for this_array in labelling_array:
+                # extract bands
+                red = labelling_array[2][i]
+                green = labelling_array[0][i]
+                nir = labelling_array[1][i]
+                
+                img_chunk_stack = np.stack((
+                    red, 
+                    green, 
+                    nir
+                    ))
+                print("bands stacked")
+                
+                # mask clouds from a single chunk
+                import omnicloudmask as ocm
+                pred_mask_2d = ocm.predict_from_array(
+                    img_chunk_stack, 
+                    patch_size=157, patch_overlap=64, 
+                    inference_device="cpu", inference_dtype="fp32"
+                    )[0]
+                
+                combined_mask = (
+                    (pred_mask_2d == 1) | 
+                    (pred_mask_2d == 2) | 
+                    (pred_mask_2d == 3)
+                    )
+                
+                # float is used as it supports NaN
+                red[combined_mask] = np.nan
+                green[combined_mask] = np.nan
+                nir[combined_mask] = np.nan
+                print("clouds masked")
+                
+                # ==== calculate indices ==== #
+                ndwi = (green - nir) / (green + nir)
+                
+                ndwi_per_chunk.append(ndwi)
+                print("indices calculated")
+            
+            index_chunk_arrays = {"ndwi": ndwi_per_chunk}
+            
+# =============================================================================
+#                 # compute indices on a single chunk
+#                 indices = four_compute_indices(this_chunk)
+#                 for key in this_chunk:
+#                     this_chunk[key].append(indices[key])
+# =============================================================================
+            
+            # ==== spectral temporal metrics ==== #
+            for index_name, arrays_list in index_chunk_arrays.items():
+                stack = np.stack(arrays_list)
+                p25, median, p75 = np.nanpercentile(stack, [25, 50, 75], axis=0)
+                mean = np.nanmean(stack, axis=0)
+                
+                chunk_stms[index_name] = ({
+                    "p25":      p25, 
+                    "median":   median, 
+                    "p75":      p75, 
+                    "mean":     mean
+                    })
+            this_chunk = chunk_stms["ndwi"]["median"] # TEMPORARILY JUST MEDIAN
+            print("STMs complete")
+"""
