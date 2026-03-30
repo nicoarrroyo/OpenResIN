@@ -268,7 +268,7 @@ def plot_indices(data, size, save_image, folder_path, res):
     print("NDWI image display complete!")
 
 def plot_chunks(ndwi, index_chunks, plot_size_chunks, i, 
-                tci_chunks, tci_60_array):
+                tci_chunks, tci_60_array, LP_MODE):
     """ OUT OF DATE
     Plots image chunks of calculated indices (NDWI and MNDWI) and True Color 
     Images (TCI).
@@ -317,28 +317,37 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i,
                                  vmax=np.nanmax(ndwi))
     title_size = 5
     
+    if not LP_MODE:
+        index_chunk = index_chunks[i]
+        tci_chunk = tci_chunks[i]
+    elif LP_MODE:
+        index_chunk = index_chunks[i]
+        tci_chunk = tci_chunks[i]
+        
+    
     fig, axes = plt.subplots(2, 2, figsize=plot_size_chunks)
+    
     # plot 1, top left: NDWI chunk (full resolution)
-    axes[0][0].imshow(index_chunks[i], norm=norm_ndwi)
+    axes[0][0].imshow(index_chunk, norm=norm_ndwi)
     axes[0][0].set_title(f"{index_labels[0]} Chunk {i}", 
                          fontsize=title_size)
     #axes[0][0].tick_params(axis="both", labelsize=label_size)
     axes[0][0].axis("off")
     
-    # plot 2, top right: MNDWI chunk (merged resolution)
-    axes[0][1].imshow(index_chunks[i], norm=base_ndwi)
+    # plot 2, top right: Adjusted NDWI chunk (merged resolution)
+    axes[0][1].imshow(index_chunk, norm=base_ndwi)
     axes[0][1].set_title(f"{index_labels[1]} Chunk {i}", 
                          fontsize=title_size)
     #axes[0][1].tick_params(axis="both", labelsize=label_size)
     axes[0][1].axis("off")
     
     # plot 3, bottom left: TCI chunk (full resolution)
-    axes[1][0].imshow(tci_chunks[i])
+    axes[1][0].imshow(tci_chunk)
     axes[1][0].set_title(f"TCI Chunk {i}", fontsize=title_size)
     #axes[1][0].tick_params(axis="both", labelsize=label_size)
     axes[1][0].axis("off")
     
-    # plot 4, bottom right: tracker TCI (60m resolution)
+    # plot 4, bottom right: Tracker TCI (60m resolution)
     axes[1][1].imshow(tci_60_array)
     axes[1][1].set_title("Tracker TCI", fontsize=title_size)
     axes[1][1].axis("off")
