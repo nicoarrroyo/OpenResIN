@@ -6,7 +6,7 @@ import user_interfacing as ui_do
 import os
 
 EPOCH_SETTINGS = list(range(50, 175, 25))
-NUM_REPEATS    = 10
+NUM_REPEATS    = 2
 
 folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
 folders = ui_do.list_folders(folders_path)[0]

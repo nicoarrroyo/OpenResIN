@@ -75,6 +75,7 @@ if LP_MODE:
         solution="Accept the switch to LP_MODE.")
     image_arrays_list = []
 ui_do.confirm_continue_or_exit()
+LP_MODE = False
 
 ui_do.table_print(
     n_chunks=c.N_CHUNKS, n_images=c.N_IMAGES, high_res=c.HIGH_RES, 
@@ -87,7 +88,6 @@ ui_do.table_print(
     low_power=LP_MODE)
 
     # %% 1. Create Image Arrays
-index_arrays = {"ndwi": [], "ndvi": []}
 tci_array = np.empty([1,1]); tci_60_array = np.empty([1,1])
 for folder_num, folder in enumerate(folders):
     print("\n===============")
@@ -140,9 +140,7 @@ for folder_num, folder in enumerate(folders):
     print("| STEP 4 |")
     print("----------")
     if not LP_MODE:
-        indices = operation.four_compute_indices(image_arrays)
-        for key in index_arrays:
-            index_arrays[key].append(indices[key])
+        index_arrays = operation.four_compute_indices(image_arrays)
     elif LP_MODE:
         print("skipping spectral index calculation (done during labelling)")
 
@@ -157,7 +155,7 @@ if not LP_MODE:
     elif not c.COMPOSITING:
         labelling_array = operation.five_mean(index_arrays)["ndwi"]
 elif LP_MODE:
-    labelling_array = image_arrays_list # so far, only known features masked in LP_MODE
+    labelling_array = image_arrays_list # known features get masked in LP_MODE
     print("skipping image compositing (done during labelling)")
 
 if c.SHOW_INDEX_PLOTS and not LP_MODE:

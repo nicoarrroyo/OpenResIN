@@ -265,6 +265,9 @@ def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
 def four_compute_indices(image_arrays):
     
     print(f"step 4 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    
+    index_arrays = {"ndwi": [], "ndvi": []}
+    
     print("converting image array types")
     # first convert to float32 (np.uint16 type is bad for algebraic operations)!
     for i, image_array in enumerate(image_arrays):
@@ -287,8 +290,10 @@ def four_compute_indices(image_arrays):
     # evi2 = 2.4 * (nir - red) / (nir + red + 1) # 2-band evi can be useful
     # evi2_arrays_list.append(evi2)
     
+    index_arrays = {"ndwi":ndwi, "ndvi":ndvi}
+    
     print(f"step 4 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
-    return {"ndwi":ndwi, "ndvi":ndvi}
+    return index_arrays
 
 # %% 5. Image compositing (and plotting)
 def five_composite(index_arrays):
@@ -324,12 +329,12 @@ def five_composite(index_arrays):
             p25, median, p75 = np.percentile(stack, [25, 50, 75], axis=0)
             mean = np.nanmean(stack, axis=0)
         
-        stms[index_name] = {
-            "p25": p25, 
+        stms[index_name] = ({
+            "p25"   : p25, 
             "median": median, 
-            "p75": p75, 
-            "mean": mean
-            }
+            "p75"   : p75, 
+            "mean"  : mean
+            })
     
     print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return stms
@@ -493,7 +498,7 @@ def six_prepare_data(folders, prefix):
             invalid_rows, lines, last_chunk, labelling_path]
 
 # %%
-def lp_chunk_processing(img_chunks_list, i):
+def lp_chunk_processing(imgs, i):
     """
     Processes one element of a numpy array (according to NALIRA pipeline).
     
@@ -513,7 +518,7 @@ def lp_chunk_processing(img_chunks_list, i):
         THOSE items is a numpy array representing a single chunk of a single 
         band of a single image. 
     i : int
-        Counter for what chunk we're on.
+        Counter of current chunk.
     
     Returns
     -------
@@ -521,38 +526,65 @@ def lp_chunk_processing(img_chunks_list, i):
         Input into the rest of step 7.
     
     """
-    print(f"processing chunk {i}")
     start_time = time.monotonic()
     
-    indices_per_chunk = []
-    index_arrays_per_chunk = {"ndwi": [], "ndvi": []}
+    indices = []
     
-    # chunk_stms = {"ndwi": []}
+    for img in imgs:
+        for band_array in img:
+            current_chunk = band_array[i]
+            
+            masked_chunk = three_mask_clouds(
+                current_chunk, 
+                patch_size=75, 
+                patch_overlap=64, 
+                batch_size=4, 
+                inference_device="cpu", 
+                inference_dtype="fp32")
+            print("cloud masking complete")
+            
+        indices.append(four_compute_indices(masked_chunk))
+        print("index calculation complete")
     
-    for img_chunks in img_chunks_list:
-        # --- cloud masking --- #
-        this_chunk = [img_chunks[band][i] for band in range(len(img_chunks))]
-        masked_chunk = three_mask_clouds(this_chunk)
-        print("cloud masking complete")
-        
-        # --- spectral index calculation --- #
-        indices_per_chunk.append(four_compute_indices(masked_chunk))
-	
-    for index_array_per_chunk in index_arrays_per_chunk:
-        for key in index_array_per_chunk:
-            index_array_per_chunk[key].append(indices_per_chunk[key])
+    stms = five_composite(indices)
     
-    # --- spectral temporal metrics --- #
-    if c.COMPOSITING:
-        index_stms_per_chunk = five_composite(index_arrays_per_chunk)
-        labelling_array = index_stms_per_chunk["ndwi"]["median"] # TODO replace with stm
-    elif not c.COMPOSITING:
-        labelling_array = five_mean(index_arrays_per_chunk)["ndwi"]
-	
     time_taken = round(time.monotonic() - start_time, 1)
-    print(f"STM stacking complete! finished at {time_taken}")
+    print(f"chunk processing completed in {time_taken}")
     
-    return labelling_array
+    return stms
+    
+    # ==== STORAGE ====
+# =============================================================================
+#     indices_per_chunk = []
+#     index_arrays_per_chunk = {"ndwi": [], "ndvi": []}
+#     
+#     # chunk_stms = {"ndwi": []}
+#     
+#     for img_chunks in img_chunks_list:
+#         # --- cloud masking --- #
+#         this_chunk = [img_chunks[band] for band in range(len(img_chunks))]
+#         masked_chunk = three_mask_clouds(this_chunk)
+#         print("cloud masking complete")
+#         
+#         # --- spectral index calculation --- #
+#         indices_per_chunk.append(four_compute_indices(masked_chunk))
+# 	
+#     for index_array_per_chunk in index_arrays_per_chunk:
+#         for key in index_array_per_chunk:
+#             index_array_per_chunk[key].append(indices_per_chunk[key])
+#     
+#     # --- spectral temporal metrics --- #
+#     if c.COMPOSITING:
+#         index_stms_per_chunk = five_composite(index_arrays_per_chunk)
+#         labelling_array = index_stms_per_chunk["ndwi"]["median"] # TODO replace with stm
+#     elif not c.COMPOSITING:
+#         labelling_array = five_mean(index_arrays_per_chunk)["ndwi"]
+# 	
+#     time_taken = round(time.monotonic() - start_time, 1)
+#     print(f"STM stacking complete! finished at {time_taken}")
+#     
+#     return labelling_array
+# =============================================================================
 
 # %% 7. Data labelling
 def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array, 
@@ -625,7 +657,7 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
             break
         
         if LP_MODE:
-            labelling_array = lp_chunk_processing(img_chunks_list, i)
+            labelling_array = lp_chunk_processing(img_chunks_list)
         
         image_do.plot_chunks(labelling_array, index_chunks, c.PLOT_SIZE_CHUNKS, 
                              i, tci_chunks, tci_60_array, LP_MODE)
