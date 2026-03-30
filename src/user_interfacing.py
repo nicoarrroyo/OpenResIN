@@ -121,6 +121,42 @@ def failure(failure, solution, error):
     print(f"FAILURE: {failure} due to {error}")
     print(f"Trying {solution}")
 
+def alert_user(warning, consequence, solution, n_errors=None):
+    """
+    Alert the user about a possible problem, explain it, and offer a solution.
+    
+    Provide the user with a warning that something has gone / could go wrong, 
+    explain the consequences of the warning, and offer a solution. There is 
+    also the option to include a counter for number of errors. Should this not 
+    be passed, the number of errors is not included in the output. 
+
+    Parameters
+    ----------
+    warning : str
+        Outline what has gone / could go wrong.
+    consequence : str
+        Sentence explaining the consequence of the error / warning.
+    solution : str
+        Suggested solution to the error.
+    n_errors : integer, optional
+        Number of errors found so far.
+
+    Returns
+    -------
+    n_errors + 1
+        Increments the number of errors found. If n_errors is not given, 
+        nothing is returned
+
+    """
+    if n_errors:
+        print(f"\n | {n_errors}. WARNING: {warning}")
+    else:
+        print(f"\n | WARNING: {warning}")
+    print(f" | CONSEQUENCE: {consequence}")
+    print(f" | SOLUTION: {solution}")
+    
+    if n_errors: return n_errors + 1
+
 def confirm_continue_or_exit():
     """
     Asks the user if they want to continue with the program.
