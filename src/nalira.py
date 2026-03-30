@@ -59,6 +59,23 @@ from misc import pre_run_checks
 
 import nalira_config as c
 
+folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
+folders = ui_do.list_folders(folders_path)
+
+LP_MODE = pre_run_checks()
+if LP_MODE:
+    ui_do.alert_user(
+        warning=("Pre-run checks found that your machine lacks the supported "
+                 "hardware to accelerate the regular NALIRA workflow."), 
+        consequence=("The program wants to switch to the low-power mode "
+                     "(LP_mode) branch, where expensive operations like cloud "
+                     "masking and percentile calculations will be carried out "
+                     "on a chunk-by-chunk basis. Data segmentation in LP_MODE "
+                     "is not supported yet, but your responses will be saved."), 
+        solution="Accept the switch to LP_MODE.")
+    image_arrays_list = []
+ui_do.confirm_continue_or_exit()
+
 ui_do.table_print(
     n_chunks=c.N_CHUNKS, n_images=c.N_IMAGES, high_res=c.HIGH_RES, 
     known_feature_masking=c.KNOWN_FEATURE_MASKING, 
@@ -66,24 +83,12 @@ ui_do.table_print(
     compositing=c.COMPOSITING, 
     show_plots=c.SHOW_INDEX_PLOTS, 
     save_images=c.SAVE_IMAGES, 
-    labelling=c.LABEL_DATA)
+    labelling=c.LABEL_DATA, 
+    low_power=LP_MODE)
 
+    # %% 1. Create Image Arrays
 index_arrays = {"ndwi": [], "ndvi": []}
 tci_array = np.empty([1,1]); tci_60_array = np.empty([1,1])
-
-folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
-folders = ui_do.list_folders(folders_path)
-
-LP_MODE = pre_run_checks()
-if LP_MODE:
-    print("Suggesting to use low-power NALIRA variant")
-    print("Expensive operations like cloud masking and percentile calculations"
-          " will be carried out on a chunk-by-chunk basis. The data will not "
-          "segmented but responses will be saved.")
-    ui_do.confirm_continue_or_exit()
-else:
-    ui_do.confirm_continue_or_exit()
-    # %% 1. Create Image Arrays
 for folder_num, folder in enumerate(folders):
     print("\n===============")
     print(f"|| IMG {folder_num+1} / {len(folders)} ||")
@@ -101,6 +106,8 @@ for folder_num, folder in enumerate(folders):
          folder, 
          tci_60_array # for checking if a tci has been opened yet
          )
+    if LP_MODE:
+        image_arrays_list.append(image_arrays)
     
     # %% 2. Mask Known Features
     print("----------")
@@ -110,17 +117,23 @@ for folder_num, folder in enumerate(folders):
         image_arrays = operation.two_mask_known_feature(
             image_arrays, 
             image_metadata)
-    else:
+        if LP_MODE: # overwrite previous image arrays if features get masked
+            for i, image_arrays in enumerate(image_arrays_list):
+                image_arrays_list[i] = image_arrays
+    elif not c.KNOWN_FEATURE_MASKING:
         print("skipping known feature masking")
     
     # %% 3. Mask Clouds (Omnicloudmask)
     print("----------")
     print("| STEP 3 |")
     print("----------")
-    if c.CLOUD_MASKING and not LP_MODE:
-        image_arrays = operation.three_mask_clouds(image_arrays)
-    else:
-        print("skipping cloud masking")
+    if not LP_MODE:
+        if c.CLOUD_MASKING:
+            image_arrays = operation.three_mask_clouds(image_arrays)
+        elif not c.CLOUD_MASKING:
+            print("skipping cloud masking")
+    elif LP_MODE:
+        print("skipping cloud masking (done during labelling)")
     
     # %% 4. Calculate Spectral Indices
     print("----------")
@@ -130,19 +143,25 @@ for folder_num, folder in enumerate(folders):
         indices = operation.four_compute_indices(image_arrays)
         for key in index_arrays:
             index_arrays[key].append(indices[key])
+    elif LP_MODE:
+        print("skipping spectral index calculation (done during labelling)")
 
 # %% 5. Composite Images (and plot)
 print("----------")
 print("| STEP 5 |")
 print("----------")
-if c.COMPOSITING and not LP_MODE:
-    stms = operation.five_composite(index_arrays)
-    ndwi_mean = stms["ndwi"]["median"] # temporary. will replace with full stm
-elif not c.COMPOSITING and not LP_MODE:
-    ndwi_mean = operation.five_mean(index_arrays)["ndwi"]
+if not LP_MODE:
+    if c.COMPOSITING:
+        stms = operation.five_composite(index_arrays)
+        labelling_array = stms["ndwi"]["median"] # TODO. will replace with full stm
+    elif not c.COMPOSITING:
+        labelling_array = operation.five_mean(index_arrays)["ndwi"]
+elif LP_MODE:
+    labelling_array = image_arrays_list # so far, only known features masked in LP_MODE
+    print("skipping image compositing (done during labelling)")
 
 if c.SHOW_INDEX_PLOTS and not LP_MODE:
-    operation.fiveb_plot(ndwi_mean, folders_path)
+    operation.fiveb_plot(labelling_array, folders_path)
 else:
     print("skipping water index image display")
 
@@ -170,11 +189,12 @@ else:
 print("----------")
 print("| STEP 7 |")
 print("----------")
+
 if c.LABEL_DATA:
     index_chunks = operation.seven_label_data(
         LP_MODE,
         i, 
-        ndwi_mean, 
+        labelling_array, 
         tci_array, 
         tci_60_array, 
         data_file_path, 
@@ -195,4 +215,5 @@ if not LP_MODE:
         data_file_path, 
         index_chunks, 
         labelling_path, 
-        prefix)
+        prefix
+        )
