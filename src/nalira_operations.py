@@ -265,9 +265,7 @@ def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
 def four_compute_indices(image_arrays):
     
     print(f"step 4 beginning at {dt.datetime.now().time():%H:%M:%S}")
-    
-    index_arrays = {"ndwi": [], "ndvi": []}
-    
+        
     print("converting image array types")
     # first convert to float32 (np.uint16 type is bad for algebraic operations)!
     for i, image_array in enumerate(image_arrays):
@@ -290,16 +288,15 @@ def four_compute_indices(image_arrays):
     # evi2 = 2.4 * (nir - red) / (nir + red + 1) # 2-band evi can be useful
     # evi2_arrays_list.append(evi2)
     
-    index_arrays = {"ndwi":ndwi, "ndvi":ndvi}
+    indices = {"ndwi":ndwi, "ndvi":ndvi}
     
     print(f"step 4 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
-    return index_arrays
+    return indices
 
 # %% 5. Image compositing (and plotting)
 def five_composite(index_arrays):
     print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
-    # start by checking for cuda install
-    try:
+    try: # start by checking for cuda install
         import cupy; del cupy;
         use_cuda = True
     except:
@@ -324,7 +321,10 @@ def five_composite(index_arrays):
             p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
             
             import cupy as cp
-            mean = cp.nanmean(stack, axis=0)
+            stack_gpu = cp.asarray(stack)
+            mean = cp.asnumpy(cp.nanmean(stack_gpu, axis=0))
+            del stack_gpu
+            cp.get_default_memory_pool().free_all_blocks()
         else:
             p25, median, p75 = np.percentile(stack, [25, 50, 75], axis=0)
             mean = np.nanmean(stack, axis=0)
