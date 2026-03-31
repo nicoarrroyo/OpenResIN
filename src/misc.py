@@ -18,17 +18,18 @@ def pre_run_checks():
         del torch; del omnicloudmask; del cupy;
         LP_MODE = False
     except:
-        cuda_available = False
-        cupy_available = False
-        import omnicloudmask
-        del omnicloudmask
-        ocm_available = True
-        LP_MODE = True
-    finally:
-        ocm_available = False
-        cuda_available = False
-        cupy_available = False
-        LP_MODE = True
+        try:
+            cuda_available = False
+            cupy_available = False
+            import omnicloudmask
+            del omnicloudmask
+            ocm_available = True
+            LP_MODE = True
+        except:
+            ocm_available = False
+            cuda_available = False
+            cupy_available = False
+            LP_MODE = True
     
     # ==== STEP ONE CHECK ====
     one_pass        = True # creating image arrays

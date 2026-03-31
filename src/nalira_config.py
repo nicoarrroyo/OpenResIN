@@ -27,7 +27,7 @@ PLOT_SIZE               = (3, 3)    # larger plots increase detail and pixel cou
 
 PLOT_SIZE_CHUNKS        = (4, 4)
 
-N_IMAGES                = -1         # number of the found images to use (-1 for all)
+N_IMAGES                = 1         # number of the found images to use (-1 for all)
 # --- Processing Settings ---
 
 # --- Paths ---
