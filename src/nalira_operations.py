@@ -528,32 +528,36 @@ def lp_chunk_processing(imgs, i):
     """
     start_time = time.monotonic()
     
-    indices = []
+    # indices = []
+    index_arrays = {"ndwi": [], "ndvi": []}
     
     for img in imgs:
-        for band_array in img:
-            current_chunk = band_array[i]
-            
-            masked_chunk = three_mask_clouds(
-                current_chunk, 
-                patch_size=75, 
-                patch_overlap=64, 
-                batch_size=4, 
-                inference_device="cpu", 
-                inference_dtype="fp32")
-            print("cloud masking complete")
-            
-        indices.append(four_compute_indices(masked_chunk))
+        current_chunk = [img[band][i] for band in range(len(img))]
+        
+        masked_chunk = three_mask_clouds(
+            current_chunk, 
+            patch_size=75, 
+            patch_overlap=64, 
+            batch_size=4, 
+            inference_device="cuda", # might as well attempt
+            inference_dtype="float32")
+        print("cloud masking complete")
+        
+        # indices.append(four_compute_indices(masked_chunk))
+        indices = operation.four_compute_indices(image_arrays)
+        for key in index_arrays:
+            index_arrays[key].append(indices[key])
         print("index calculation complete")
     
     stms = five_composite(indices)
+    labelling_array = stms["ndwi"]["median"] # TODO replace with full stm
     
     time_taken = round(time.monotonic() - start_time, 1)
     print(f"chunk processing completed in {time_taken}")
     
-    return stms
+    return labelling_array
     
-    # ==== STORAGE ====
+    # %% ==== STORAGE ====
 # =============================================================================
 #     indices_per_chunk = []
 #     index_arrays_per_chunk = {"ndwi": [], "ndvi": []}
@@ -641,6 +645,7 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
         index_chunks = misc.split_array(array=labelling_array, n_chunks=c.N_CHUNKS)
         tci_chunks = misc.split_array(array=tci_array, n_chunks=c.N_CHUNKS)
     elif LP_MODE:
+        # TODO create a LP_MODE flag in split_array and move this logic there
         img_chunks_list = [] # will be shape: [n_images][n_bands][n_chunks][h][w]
         for img in labelling_array:
             img_chunks_list_band = []
@@ -657,7 +662,7 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
             break
         
         if LP_MODE:
-            labelling_array = lp_chunk_processing(img_chunks_list)
+            labelling_array = lp_chunk_processing(img_chunks_list, i)
         
         image_do.plot_chunks(labelling_array, index_chunks, c.PLOT_SIZE_CHUNKS, 
                              i, tci_chunks, tci_60_array, LP_MODE)

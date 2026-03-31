@@ -63,6 +63,7 @@ folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
 folders = ui_do.list_folders(folders_path)
 
 LP_MODE = pre_run_checks()
+LP_MODE = True
 if LP_MODE:
     ui_do.alert_user(
         warning=("Pre-run checks found that your machine lacks the supported "
@@ -75,7 +76,6 @@ if LP_MODE:
         solution="Accept the switch to LP_MODE.")
     image_arrays_list = []
 ui_do.confirm_continue_or_exit()
-LP_MODE = False
 
 ui_do.table_print(
     n_chunks=c.N_CHUNKS, n_images=c.N_IMAGES, high_res=c.HIGH_RES, 
