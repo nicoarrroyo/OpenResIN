@@ -544,51 +544,18 @@ def lp_chunk_processing(imgs, i):
         print("cloud masking complete")
         
         # indices.append(four_compute_indices(masked_chunk))
-        indices = operation.four_compute_indices(image_arrays)
+        indices = four_compute_indices(masked_chunk)
         for key in index_arrays:
             index_arrays[key].append(indices[key])
         print("index calculation complete")
     
-    stms = five_composite(indices)
+    stms = five_composite(index_arrays)
     labelling_array = stms["ndwi"]["median"] # TODO replace with full stm
     
     time_taken = round(time.monotonic() - start_time, 1)
     print(f"chunk processing completed in {time_taken}")
     
     return labelling_array
-    
-    # %% ==== STORAGE ====
-# =============================================================================
-#     indices_per_chunk = []
-#     index_arrays_per_chunk = {"ndwi": [], "ndvi": []}
-#     
-#     # chunk_stms = {"ndwi": []}
-#     
-#     for img_chunks in img_chunks_list:
-#         # --- cloud masking --- #
-#         this_chunk = [img_chunks[band] for band in range(len(img_chunks))]
-#         masked_chunk = three_mask_clouds(this_chunk)
-#         print("cloud masking complete")
-#         
-#         # --- spectral index calculation --- #
-#         indices_per_chunk.append(four_compute_indices(masked_chunk))
-# 	
-#     for index_array_per_chunk in index_arrays_per_chunk:
-#         for key in index_array_per_chunk:
-#             index_array_per_chunk[key].append(indices_per_chunk[key])
-#     
-#     # --- spectral temporal metrics --- #
-#     if c.COMPOSITING:
-#         index_stms_per_chunk = five_composite(index_arrays_per_chunk)
-#         labelling_array = index_stms_per_chunk["ndwi"]["median"] # TODO replace with stm
-#     elif not c.COMPOSITING:
-#         labelling_array = five_mean(index_arrays_per_chunk)["ndwi"]
-# 	
-#     time_taken = round(time.monotonic() - start_time, 1)
-#     print(f"STM stacking complete! finished at {time_taken}")
-#     
-#     return labelling_array
-# =============================================================================
 
 # %% 7. Data labelling
 def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array, 
@@ -641,9 +608,10 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
     
     # #### 7.1 Creating Chunks from Satellite Imagery
     print(f"creating {c.N_CHUNKS} chunks from satellite imagery")
+    
+    tci_chunks = misc.split_array(array=tci_array, n_chunks=c.N_CHUNKS)
     if not LP_MODE:
         index_chunks = misc.split_array(array=labelling_array, n_chunks=c.N_CHUNKS)
-        tci_chunks = misc.split_array(array=tci_array, n_chunks=c.N_CHUNKS)
     elif LP_MODE:
         # TODO create a LP_MODE flag in split_array and move this logic there
         img_chunks_list = [] # will be shape: [n_images][n_bands][n_chunks][h][w]
@@ -661,8 +629,9 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
         if break_flag:
             break
         
-        if LP_MODE:
-            labelling_array = lp_chunk_processing(img_chunks_list, i)
+        if LP_MODE: # TODO these variable names are misleading
+            index_chunks = lp_chunk_processing(img_chunks_list, i)
+            labelling_array = labelling_array[0]
         
         image_do.plot_chunks(labelling_array, index_chunks, c.PLOT_SIZE_CHUNKS, 
                              i, tci_chunks, tci_60_array, LP_MODE)
