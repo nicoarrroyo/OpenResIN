@@ -89,6 +89,7 @@ ui_do.table_print(
 
     # %% 1. Create Image Arrays
 tci_array = np.empty([1,1]); tci_60_array = np.empty([1,1])
+index_arrays = {"ndwi": [], "ndvi": []}
 for folder_num, folder in enumerate(folders):
     print("\n===============")
     print(f"|| IMG {folder_num+1} / {len(folders)} ||")
@@ -118,8 +119,7 @@ for folder_num, folder in enumerate(folders):
             image_arrays, 
             image_metadata)
         if LP_MODE: # overwrite previous image arrays if features get masked
-            for i, image_arrays in enumerate(image_arrays_list):
-                image_arrays_list[i] = image_arrays
+            image_arrays_list[folder_num] = image_arrays
     elif not c.KNOWN_FEATURE_MASKING:
         print("skipping known feature masking")
     
@@ -140,7 +140,9 @@ for folder_num, folder in enumerate(folders):
     print("| STEP 4 |")
     print("----------")
     if not LP_MODE:
-        index_arrays = operation.four_compute_indices(image_arrays)
+        indices = operation.four_compute_indices(image_arrays)
+        for key in index_arrays:
+            index_arrays[key].append(indices[key])
     elif LP_MODE:
         print("skipping spectral index calculation (done during labelling)")
 
@@ -151,7 +153,7 @@ print("----------")
 if not LP_MODE:
     if c.COMPOSITING:
         stms = operation.five_composite(index_arrays)
-        labelling_array = stms["ndwi"]["median"] # TODO. will replace with full stm
+        labelling_array = stms["ndwi"]["median"] # TODO replace with full stm
     elif not c.COMPOSITING:
         labelling_array = operation.five_mean(index_arrays)["ndwi"]
 elif LP_MODE:
