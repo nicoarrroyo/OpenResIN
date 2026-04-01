@@ -240,7 +240,6 @@ def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
             inference_device=inference_device, 
             inference_dtype=inference_dtype
             )[0]
-        predict_from_array
     except Exception as e:
         print(f"FAILURE: call to CUDA (due to error: {e})")
         print("TRYING: use CPU for inference (slower)")
@@ -551,9 +550,10 @@ def lp_chunk_processing(imgs, i):
         for key in index_arrays:
             index_arrays[key].append(indices[key])
         print("index calculation complete")
+        image_do.plot_indices(indices["ndwi"], (3,3), False, c.HOME_DIR, "60m")
     
     stms = five_composite(index_arrays)
-    labelling_array = stms["ndwi"]["median"] # TODO replace with full stm
+    labelling_array = stms["ndwi"]["mean"] # TODO replace with full stm
     
     time_taken = round(time.monotonic() - start_time, 1)
     print(f"chunk processing completed in {time_taken}")
@@ -634,7 +634,7 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
         
         if LP_MODE: # TODO these variable names are misleading
             index_chunks = lp_chunk_processing(img_chunks_list, i)
-            labelling_array = labelling_array[0]
+            labelling_array = index_chunks
         
         image_do.plot_chunks(labelling_array, index_chunks, c.PLOT_SIZE_CHUNKS, 
                              i, tci_chunks, tci_60_array, LP_MODE)
