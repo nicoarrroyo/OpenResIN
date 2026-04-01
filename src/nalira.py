@@ -55,7 +55,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__))) # fix working directory
 import numpy as np
 import nalira_operations as operation
 import user_interfacing as ui_do
-from misc import pre_run_checks
+from misc import pre_run_checks#, lp_check
 
 import nalira_config as c
 
@@ -63,6 +63,8 @@ folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
 folders = ui_do.list_folders(folders_path)
 
 LP_MODE = pre_run_checks()
+# LP_MODE = lp_check()
+LP_MODE = True
 if LP_MODE:
     ui_do.alert_user(
         warning=("Pre-run checks found that your machine lacks the supported "
@@ -188,7 +190,6 @@ else:
 print("----------")
 print("| STEP 7 |")
 print("----------")
-
 if c.LABEL_DATA:
     index_chunks = operation.seven_label_data(
         LP_MODE,
@@ -217,4 +218,4 @@ if not LP_MODE:
         prefix
         )
 elif LP_MODE:
-    print("skipping data segmentation (cannot be done in LP MODE)")
+    print("skipping data segmentation (not supported in LP MODE)")

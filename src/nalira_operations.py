@@ -529,7 +529,6 @@ def lp_chunk_processing(imgs, i):
     """
     start_time = time.monotonic()
     
-    # indices = []
     index_arrays = {"ndwi": [], "ndvi": []}
     
     for img in imgs:
@@ -545,12 +544,10 @@ def lp_chunk_processing(imgs, i):
             LP_MODE=True)
         print("cloud masking complete")
         
-        # indices.append(four_compute_indices(masked_chunk))
         indices = four_compute_indices(masked_chunk)
         for key in index_arrays:
             index_arrays[key].append(indices[key])
         print("index calculation complete")
-        image_do.plot_indices(indices["ndwi"], (3,3), False, c.HOME_DIR, "60m")
     
     stms = five_composite(index_arrays)
     labelling_array = stms["ndwi"]["mean"] # TODO replace with full stm
@@ -638,6 +635,7 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
         
         image_do.plot_chunks(labelling_array, index_chunks, c.PLOT_SIZE_CHUNKS, 
                              i, tci_chunks, tci_60_array, LP_MODE)
+        # TODO broken max values in LP MODE (at least it works though!)
         max_index = [0, 0]
         max_index[0] = round(np.nanmax(index_chunks[i]), 2)
         print(f"MAX ADJUSTED NDWI: {max_index[0]}", end=" | ")
