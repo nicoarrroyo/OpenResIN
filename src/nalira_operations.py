@@ -241,12 +241,22 @@ def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
             inference_dtype=inference_dtype
             )[0]
     except Exception as e:
-        print(f"FAILURE: call to CUDA (due to error: {e})")
-        print("TRYING: use CPU for inference (slower)")
-        ui_do.confirm_continue_or_exit()
+# =============================================================================
+#         ui_do.alert_user(
+#             warning="CUDA inference failed", 
+#             consequence="Cloud masking has to fall back to CPU", 
+#             solution="Use CPU for inference (slower)")
+# =============================================================================
+        if not LP_MODE:
+            ui_do.alert_user(
+                warning=f"CUDA inference failed (due to error: {e})", 
+                consequence="Cloud masking has to fall back to CPU", 
+                solution="Use CPU for inference (slower)")
+            ui_do.confirm_continue_or_exit()
         pred_mask_2d = predict_from_array(
             input_array, 
-            inference_device="cpu")[0]
+            inference_device="cpu"
+            )[0]
     
     combined_mask = (
         (pred_mask_2d == 1) | 
@@ -636,11 +646,8 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
         image_do.plot_chunks(labelling_array, index_chunks, c.PLOT_SIZE_CHUNKS, 
                              i, tci_chunks, tci_60_array, LP_MODE)
         # TODO broken max values in LP MODE (at least it works though!)
-        max_index = [0, 0]
-        max_index[0] = round(np.nanmax(index_chunks[i]), 2)
-        print(f"MAX ADJUSTED NDWI: {max_index[0]}", end=" | ")
-        max_index[1] = round(np.nanmax(index_chunks[i]), 2)
-        print(f"MAX NDWI: {max_index[1]}")
+        print(f"MAX ADJUSTED NDWI: {np.nanmax(index_chunks[i]):.3f}", end=" | ")
+        print(f"MAX NDWI: {np.nanmax(index_chunks[i]):.3f}")
         
         # #### 7.3 User Labelling
         data_do.blank_entry_check(file=data_file_path)
