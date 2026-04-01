@@ -214,10 +214,10 @@ def two_mask_known_feature(image_arrays, image_metadata):
 # %% 3. Masking out clouds (OmniCloudMask) (iterative)
 def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300, 
                       batch_size=4, inference_device="cuda", 
-                      inference_dtype="bf16"):
+                      inference_dtype="bf16", LP_MODE=False):
     
     from omnicloudmask import predict_from_array
-    if not c.HIGH_RES:
+    if not c.HIGH_RES and not LP_MODE:
         print(("WARNING: high-resolution setting is disabled. "
         "cloud masking may not be accurate"))
         ui_do.confirm_continue_or_exit()
@@ -234,9 +234,11 @@ def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
     try:
         pred_mask_2d = predict_from_array(
             input_array, 
-            inference_dtype=inference_dtype,
-            batch_size=batch_size,
-            inference_device=inference_device
+            patch_size=patch_size, 
+            patch_overlap=patch_overlap, 
+            batch_size=batch_size, 
+            inference_device=inference_device, 
+            inference_dtype=inference_dtype
             )[0]
         predict_from_array
     except Exception as e:
@@ -540,7 +542,8 @@ def lp_chunk_processing(imgs, i):
             patch_overlap=64, 
             batch_size=4, 
             inference_device="cuda", # might as well attempt
-            inference_dtype="float32")
+            inference_dtype="float32", 
+            LP_MODE=True)
         print("cloud masking complete")
         
         # indices.append(four_compute_indices(masked_chunk))

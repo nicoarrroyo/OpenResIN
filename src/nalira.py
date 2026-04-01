@@ -63,7 +63,6 @@ folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
 folders = ui_do.list_folders(folders_path)
 
 LP_MODE = pre_run_checks()
-LP_MODE = True
 if LP_MODE:
     ui_do.alert_user(
         warning=("Pre-run checks found that your machine lacks the supported "
@@ -217,3 +216,5 @@ if not LP_MODE:
         labelling_path, 
         prefix
         )
+elif LP_MODE:
+    print("skipping data segmentation (cannot be done in LP MODE)")

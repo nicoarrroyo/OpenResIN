@@ -319,10 +319,9 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i,
     
     if not LP_MODE:
         index_chunk = index_chunks[i]
-        tci_chunk = tci_chunks[i]
     elif LP_MODE:
-        index_chunk = index_chunks[i]
-        tci_chunk = tci_chunks[i]
+        index_chunk = index_chunks
+    tci_chunk = tci_chunks[i]
         
     
     fig, axes = plt.subplots(2, 2, figsize=plot_size_chunks)

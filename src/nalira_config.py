@@ -3,7 +3,7 @@ import os
 # --- Processing Settings ---
 N_CHUNKS                = 5000      # number of chunks into which images are split
 
-HIGH_RES                = False     # use finer 10m spatial resolution (slower)
+HIGH_RES                = True     # use finer 10m spatial resolution (slower)
 
 RES = "10m" if HIGH_RES else "60m"
 
