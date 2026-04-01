@@ -64,7 +64,6 @@ folders = ui_do.list_folders(folders_path)
 
 LP_MODE = pre_run_checks()
 # LP_MODE = lp_check()
-LP_MODE = True
 if LP_MODE:
     ui_do.alert_user(
         warning=("Pre-run checks found that your machine lacks the supported "
