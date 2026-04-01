@@ -132,6 +132,10 @@ def pre_run_checks():
     print("\nCOMPLETED PRE-RUN CHECKS")
     return LP_MODE
 
+def lp_check():
+    pass
+
+
 def split_array(array, n_chunks):
     """
     Split any integer array into any number of chunks. 
