@@ -1,2 +1,6 @@
-data/sat-images/*.SAFE/
 __pycache__/
+*.pyc
+
+data/sat-images/*.SAFE/
+data/masks/*/*
+!data/masks/*/.keep

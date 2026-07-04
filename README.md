@@ -18,7 +18,7 @@ The overall goal is to provide a streamlined process from raw satellite data to 
 * **Sentinel-2 Focused:** Optimised for processing Sentinel-2 `.SAFE` format imagery.
 * **Water Index Calculation:** Implements NDWI.
 * **Cloud Masking:** Uses OmniCloudMask with Sentinel-2 bands to mask clouds.
-* **Interactive Labelling GUI:** Tkinter-based interface (`NALIRA.py`) for drawing bounding boxes around features of interest.
+* **Interactive Labelling GUI:** Tkinter-based interface (`NALIRA.py`) for drawing bounding polyons around features of interest.
 * **Automated Data Segmentation:** `NALIRA.py` automatically crops and saves labelled image examples into class-specific folders.
 * **CNN Model Training:** `KRISP_trainer.py` trains a sequential CNN model using TensorFlow/Keras.
 * **Epoch Optimisation:** `epoch_pathfinder.py` helps visualise training/validation curves to select an appropriate number of epochs.
@@ -66,9 +66,9 @@ To run the entire pipeline, follow these steps sequentially.
 * **Move `responses` File:** Move the `responses_5000_chunks.csv` file into the newly created `training data` folder.
 
 **2. Training Data Generation (NALIRA)**
-* **Configure and Run `NALIRA.py`:**
-    * Open `NALIRA.py` and modify the `HOME` variable to your project's home directory.
-    * Execute the script: `python NALIRA.py`
+* **Configure and Run `nalira.py`:**
+    * Open `nalira.py` and modify the `HOME` variable to your project's home directory.
+    * Execute the script: `python nalira.py`
     * The script will process the satellite bands and calculate water indices.
     * A Tkinter window will appear for data labelling.
     * After labelling, NALIRA will automatically segment the images and save them as PNGs in the appropriate class folders.
