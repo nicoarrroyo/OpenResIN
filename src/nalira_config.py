@@ -11,9 +11,9 @@ KNOWN_FEATURE_MASKING   = False
 
 CLOUD_MASKING           = False
 
-COMPOSITING             = True
+COMPOSITING             = False
 
-SHOW_INDEX_PLOTS        = True
+SHOW_INDEX_PLOTS        = False
 
 SAVE_IMAGES             = False
 

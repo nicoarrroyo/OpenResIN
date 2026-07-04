@@ -1,0 +1,4 @@
+chunk,reservoirs,water-bodies,reservoir-coordinates,,,,,water-body-coordinates
+0,0,0,,,,,
+1,1,0,[np.float64(133.764), np.float64(135.02), np.float64(140.986), np.float64(134.706), np.float64(142.556), np.float64(147.894), np.float64(135.648), np.float64(147.58)],,,,
+2,0,1,,,,,,[np.float64(122.774), np.float64(38.308), np.float64(122.774), np.float64(44.274), np.float64(112.098), np.float64(48.042), np.float64(109.9), np.float64(44.902), np.float64(110.842), np.float64(41.134), np.float64(115.238), np.float64(40.82), np.float64(118.064), np.float64(43.646)]

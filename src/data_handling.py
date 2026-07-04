@@ -136,16 +136,18 @@ def check_file_permission(file_name):
 
 def create_box(coords):
     """
-    Creates a square bounding box containing the input coordinates,
-    adjusted to stay within the 0-157 boundary.
+    Creates a square bounding box centred on the input shape, adjusted to 
+    stay within the 0-157 boundary.
     
     Args:
-      coords: A list of four floats representing the input rectangle's
-              coordinates in the format [ULX, ULY, LRX, LRY]
-              (Upper Left X, Upper Left Y, Lower Right X, Lower Right Y).
+      coords: A flat list of floats representing the vertices of the input 
+              shape, in the format [x1, y1, x2, y2, ..., xn, yn]. This 
+              supports both the legacy two-corner rectangle format 
+              ([ULX, ULY, LRX, LRY]) and arbitrary polygons with three or 
+              more vertices, since only the centroid of the points is used.
     
     Returns:
-      A list of four floats representing the coordinates of the  bounding box 
+      A list of four floats representing the coordinates of the bounding box 
       in the format [ULX, ULY, LRX, LRY].
     """
     # --- Constants ---
@@ -154,23 +156,26 @@ def create_box(coords):
     BOX_SIZE = MAX_COORD / 5
     
     # --- Input Validation ---
-    if len(coords) != 4:
-        raise ValueError("Input coords list must contain exactly four values.")
-    ulx, uly, lrx, lry = coords
-    if not all(isinstance(c, (int, float)) for c in coords):
+    if len(coords) < 4 or len(coords) % 2 != 0:
+        raise ValueError("Input coords list must contain an even number of "
+                         "values (x, y pairs) with at least two points.")
+    if not all(isinstance(v, (int, float)) for v in coords):
         raise TypeError("All coordinates must be numbers.")
-    if ulx >= lrx or uly >= lry:
-        raise ValueError("Invalid coordinates: ULX must be < LRX and ULY must "
-                         "be < LRY.")
-    if not all(MIN_COORD <= c <= MAX_COORD for c in coords):
+    
+    xs = coords[0::2]
+    ys = coords[1::2]
+    if max(xs) <= min(xs) or max(ys) <= min(ys):
+        raise ValueError("Invalid coordinates: the shape must span a "
+                         "non-zero width and height.")
+    if not all(MIN_COORD <= v <= MAX_COORD for v in coords):
         print(f"Warning: Input coordinates {coords} contain values outside the "
               f"{MIN_COORD}-{MAX_COORD} range.")
         # Depending on requirements, you might raise an error here instead
         # Or clamp the input coordinates first
     
-    # --- 1. Calculate Center of the input rectangle ---
-    center_x = (ulx + lrx) / 2.0
-    center_y = (uly + lry) / 2.0
+    # --- 1. Calculate Centroid of the input shape (polygon or rectangle) ---
+    center_x = sum(xs) / len(xs)
+    center_y = sum(ys) / len(ys)
     
     # --- 2. Create Initiall Box centered around the input rectangle ---
     # half the sixze of desired
@@ -490,4 +495,3 @@ def hash_tfrecord(path):
         while chunk := f.read(8192): # Read in chunks (8KB at a time)
             hasher.update(chunk) # Feed each chunk into the hash
     return hasher.hexdigest() # Return the final hash as a hex string
-

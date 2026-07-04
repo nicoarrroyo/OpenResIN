@@ -577,9 +577,10 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
     
     Splits the aggregated NDWI and TCI arrays into smaller segments for batch 
     ROI labelling. Iterates through these chunks, prompting the user to specify 
-    the number of reservoirs/water bodies and draw bounding boxes. Handles 
-    regular inputs, navigation commands ('back', 'break'), and saves the 
-    extracted coordinates to the CSV file.
+    the number of reservoirs/water bodies and draw a polygon (three or more 
+    vertices) around each one. Handles regular inputs, navigation commands 
+    ('back', 'break'), and saves the extracted vertex coordinates to the CSV 
+    file.
     
     Parameters
     ----------
@@ -676,8 +677,8 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
                     n_reservoirs = input("how many "
                                          "reservoirs? ").strip().lower()
                 if n_reservoirs != 0:
-                    print("please draw a square around the reservoir(s)", 
-                          flush=True)
+                    print("please draw a shape (3+ points) around the "
+                          "reservoir(s)", flush=True)
                     chunk_coords = ui_do.prompt_roi(tci_chunks[i], n_reservoirs)
                     for coord in chunk_coords:
                         entry_list.append(coord)
@@ -690,8 +691,8 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
                 n_bodies = int(n_bodies)
                 entry_list[2] = n_bodies
                 if n_bodies != 0:
-                    print("please draw a square around the water bodies", 
-                          flush=True)
+                    print("please draw a shape (3+ points) around the "
+                          "water bodies", flush=True)
                     chunk_coords = ui_do.prompt_roi(tci_chunks[i], n_bodies)
                     for coord in chunk_coords:
                         entry_list.append(coord)
