@@ -13,13 +13,13 @@ The pipeline consists of several key components:
 
 The overall goal is to provide a streamlined process from raw satellite data to a trained model capable of identifying water features.
 
-## Features
+## Features (OUT OF DATE)
 * **End-to-End Pipeline:** Covers data preparation, labelling, training, and prediction.
 * **Sentinel-2 Focused:** Optimised for processing Sentinel-2 `.SAFE` format imagery.
 * **Water Index Calculation:** Implements NDWI.
 * **Cloud Masking:** Uses OmniCloudMask with Sentinel-2 bands to mask clouds.
-* **Interactive Labelling GUI:** Tkinter-based interface (`NALIRA.py`) for drawing bounding polyons around features of interest.
-* **Automated Data Segmentation:** `NALIRA.py` automatically crops and saves labelled image examples into class-specific folders.
+* **Interactive Labelling GUI:** Tkinter-based interface (`nalira.py`) for drawing bounding polyons around features of interest.
+* **Automated Data Segmentation:** `nalira.py` automatically crops and saves labelled image examples into class-specific folders.
 * **CNN Model Training:** `KRISP_trainer.py` trains a sequential CNN model using TensorFlow/Keras.
 * **Epoch Optimisation:** `epoch_pathfinder.py` helps visualise training/validation curves to select an appropriate number of epochs.
 * **Batch Prediction:** `KRISP-Y.py` efficiently processes large images in batches for prediction.
