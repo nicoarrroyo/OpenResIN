@@ -1,1 +1,2 @@
 data/sat-images/*.SAFE/
+__pycache__/
