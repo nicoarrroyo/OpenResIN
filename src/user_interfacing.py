@@ -484,6 +484,11 @@ def prompt_roi(image_array, n, min_vertices=3):
     finish_button = tk.Button(button_frame, text="Finish", command=finish)
     finish_button.pack(side=tk.LEFT, padx=10, expand=True, fill=tk.X)
     
+    # Route the window's own close ("X") button through the same completion
+    # check as the Finish button, so it can't be used to bypass validation
+    # and silently return an incomplete set of ROIs.
+    root.protocol("WM_DELETE_WINDOW", finish)
+    
     # Create the status bar below the buttons
     status_label = tk.Label(root, text="", bd=1, relief=tk.SUNKEN, anchor=tk.W)
     status_label.pack(fill=tk.X, padx=2, pady=2)

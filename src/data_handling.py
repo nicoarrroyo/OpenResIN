@@ -231,17 +231,35 @@ def extract_coords(coord_string, create_box_flag):
     Extracts coordinates from a string (including square brackets) and returns 
     them as a list of floats.
     
+    Besides the normal "[12.0 34.0 56.0 78.0]" format produced by 
+    format_coords, this also tolerates the legacy, malformed 
+    "[np.float64(12.0), np.float64(34.0), ...]" format that an earlier, 
+    buggy version of this tool could write to the CSV (see format_coords).
+    Any file containing that legacy format will therefore be read back 
+    correctly without needing to be re-labelled, as long as split_row() 
+    (rather than a plain line.split(",")) was used to separate that row 
+    into its columns in the first place. 
+    
     Args:
       coord_string (str): A string containing coordinates within square 
-      brackets, separated by spaces.
+      brackets, separated by spaces (or, for older files, by commas and/or 
+      wrapped in "np.float64(...)"). 
       
     Returns:
       list: A list of floats representing the coordinates.
     """
     try:
-        # Remove square brackets, split the string into numeric strings
-        coord_string = coord_string.replace('[', '').replace(']', '')
-        coord_strings = coord_string.split()
+        # Undo the legacy "np.float64(12.0), np.float64(34.0)" formatting 
+        # a coordinate cell may contain if it was written before this tool 
+        # started using format_coords, then remove the enclosing brackets 
+        # and treat commas the same as whitespace, so that both the current 
+        # and legacy formats parse the same way. 
+        cleaned = coord_string.replace('np.float64(', ' ')
+        cleaned = cleaned.replace('np.float32(', ' ')
+        cleaned = cleaned.replace('[', ' ').replace(']', ' ')
+        cleaned = cleaned.replace('(', ' ').replace(')', ' ')
+        cleaned = cleaned.replace(',', ' ')
+        coord_strings = cleaned.split()
         
         # Convert each numeric string to a float
         coordinates = [float(coord) for coord in coord_strings]
@@ -274,6 +292,45 @@ def format_coords(coords):
       str: The coordinates formatted as "[v1 v2 v3 ...]". 
     """
     return "[" + " ".join(str(float(value)) for value in coords) + "]"
+
+def split_row(line):
+    """
+    Splits a raw CSV line into its column values, treating a comma as a 
+    delimiter only when it is outside a pair of square brackets. 
+    
+    A coordinate cell is always wrapped in "[...]", but should never itself 
+    contain a comma; a plain line.split(",") assumes exactly that. A file 
+    written by an earlier, buggy version of this tool could contain 
+    coordinate cells with stray commas inside the brackets (see 
+    format_coords), which shifts every later column of that row when split 
+    naively. This function keeps the bracketed content of such a cell 
+    together as a single field regardless of what is inside it, so already
+    -labelled files read back correctly without needing to be re-labelled. 
+    
+    Args:
+      line (str): A single raw CSV row (its trailing newline, if any, is 
+      not treated specially and is left attached to the last field). 
+      
+    Returns:
+      list of str: The row's column values. 
+    """
+    fields = []
+    current = []
+    depth = 0
+    for char in line:
+        if char == '[':
+            depth += 1
+            current.append(char)
+        elif char == ']':
+            depth = max(0, depth - 1)
+            current.append(char)
+        elif char == ',' and depth == 0:
+            fields.append(''.join(current))
+            current = []
+        else:
+            current.append(char)
+    fields.append(''.join(current))
+    return fields
 
 def change_to_folder(folder_path):
     # it is BAD PRACTICE to do directory management like this

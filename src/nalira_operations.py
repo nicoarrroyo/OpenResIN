@@ -436,13 +436,13 @@ def six_prepare_data(folders, prefix):
         try:
             # Validate file data
             for i in range(1, len(lines) - 1):
-                current_chunk = int(lines[i].split(",")[0])
-                next_chunk = int(lines[i+1].split(",")[0])
+                current_chunk = int(data_do.split_row(lines[i])[0])
+                next_chunk = int(data_do.split_row(lines[i+1])[0])
                 if next_chunk - current_chunk != 1:
                     print(f"error in line {i + 2}, "
                           f"expected chunk {current_chunk + 1}")
                     raise ValueError("File validity error")
-            last_chunk = int(lines[-1].split(",")[0])
+            last_chunk = int(data_do.split_row(lines[-1])[0])
             break
         except (ValueError, IndexError) as e:
             print(f"error - file with invalid data: {e}")
@@ -472,9 +472,9 @@ def six_prepare_data(folders, prefix):
         globals()["lines"] = lines
     for j in range(1, len(lines)): # starting from the "headers" line
         # check for reservoirs without coordinates
-        num_of_reservoirs = int(lines[j].split(",")[1])
+        num_of_reservoirs = int(data_do.split_row(lines[j])[1])
         try: # try to access coordinates
-            res_coord = lines[j].split(",")[3]
+            res_coord = data_do.split_row(lines[j])[3]
             res_has_coords = bool(res_coord[0] == "[")
         except: # if unable to access, they do not exist
             res_has_coords = False
@@ -486,9 +486,9 @@ def six_prepare_data(folders, prefix):
             data_correction = True
         
         # check for non-reservoir water bodies without coordinates
-        num_of_bodies = int(lines[j].split(",")[2])
+        num_of_bodies = int(data_do.split_row(lines[j])[2])
         try: # try to access coordinates
-            body_coord = lines[j].split(",")[8]
+            body_coord = data_do.split_row(lines[j])[8]
             body_has_coords = bool(body_coord[0] == "[")
         except: # if unable to access, they do not exist
             body_has_coords = False
@@ -816,7 +816,7 @@ def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
         lines = file.readlines()
 
     for i in range(1, len(lines)):
-        lines[i] = lines[i].split(",")
+        lines[i] = data_do.split_row(lines[i])
         
         # ---- reservoirs ----
         if int(lines[i][1]) > 0:
@@ -824,23 +824,40 @@ def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
             n = int(res_rows[-1][1])
             col_range = range(3, 3 + n) if n > 1 else [3]
             for j in col_range:
-                res_coords.append(
-                    (i, data_do.extract_coords(res_rows[-1][j],
-                                               create_box_flag=True)))
+                boxed = data_do.extract_coords(res_rows[-1][j],
+                                               create_box_flag=True)
+                if not boxed:
+                    print(f"WARNING: unreadable reservoir coordinates on "
+                          f"chunk {res_rows[-1][0]} (column {j}); skipping "
+                          "this instance. Consider re-labelling this chunk.")
+                    continue
+                res_coords.append((i, boxed))
         
         # ---- water bodies / sea ----
         if int(lines[i][2]) > 0:
             body_rows.append(lines[i])
             first_coords = data_do.extract_coords(body_rows[-1][8],
                                                   create_box_flag=False)
+            if not first_coords:
+                print(f"WARNING: unreadable water-body coordinates on "
+                      f"chunk {body_rows[-1][0]}; skipping this chunk's "
+                      "water-body/sea labels. Consider re-labelling this "
+                      "chunk.")
+                continue
             is_sea = (first_coords[0] == 0 and first_coords[-1] == 157)
             if not is_sea:
                 n = int(body_rows[-1][2])
                 col_range = range(8, 8 + n) if n > 1 else [8]
                 for j in col_range:
-                    body_coords.append(
-                        (i, data_do.extract_coords(body_rows[-1][j],
-                                                   create_box_flag=True)))
+                    boxed = data_do.extract_coords(body_rows[-1][j],
+                                                   create_box_flag=True)
+                    if not boxed:
+                        print(f"WARNING: unreadable water-body coordinates "
+                              f"on chunk {body_rows[-1][0]} (column {j}); "
+                              "skipping this instance. Consider "
+                              "re-labelling this chunk.")
+                        continue
+                    body_coords.append((i, boxed))
             else:
                 sea_rows.append(lines[i])
                 sea_coords.append(

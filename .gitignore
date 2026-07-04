@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 
-data/sat-images/*.SAFE/
+data/sat-images/*/
+!data/sat-images/README.md
 data/masks/*/*
 !data/masks/*/.keep
