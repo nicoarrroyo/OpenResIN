@@ -490,6 +490,7 @@ def prompt_roi(image_array, n, min_vertices=3):
     set_status(points_status())
     
     root.mainloop()
-    rois_converted = [list(np.array(roi) * len(image_array) / width)
-                      for roi in rois]
+    rois_converted = [[float(value) for value in
+                      (np.array(roi) * len(image_array) / width)]
+                     for roi in rois]
     return rois_converted

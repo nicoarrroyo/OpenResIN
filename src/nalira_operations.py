@@ -743,10 +743,20 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
             csv_entry = ""
             first_csv_entry = True
             for entry in entry_list:
+                # coordinate entries are a sequence of vertex values (a
+                # rectangle's 2 corners or a polygon's N vertices); format
+                # these explicitly rather than relying on str(), since a
+                # plain list's str() inserts commas (breaking the CSV) and
+                # a numpy array's str() line-wraps once it gets long enough
+                # (also breaking the CSV, by inserting a raw newline).
+                if isinstance(entry, (list, tuple, np.ndarray)):
+                    formatted_entry = data_do.format_coords(entry)
+                else:
+                    formatted_entry = f"{entry}"
                 if first_csv_entry:
-                    csv_entry = f"{entry}"
+                    csv_entry = formatted_entry
                 elif not first_csv_entry:
-                    csv_entry = f"{csv_entry},{entry}"
+                    csv_entry = f"{csv_entry},{formatted_entry}"
                 first_csv_entry = False
             if data_correction: # add coordinates to data
                 lines[i] = f"{csv_entry}\n"

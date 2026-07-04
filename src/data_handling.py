@@ -251,6 +251,30 @@ def extract_coords(coord_string, create_box_flag):
         coordinates = []
     return coordinates
 
+def format_coords(coords):
+    """
+    Formats a flat list/array of vertex coordinates into the bracketed, 
+    space-separated string expected by extract_coords, e.g. 
+    "[12.0 34.0 56.0 78.0]" for a rectangle, or with as many additional 
+    x/y pairs as a polygon has vertices. 
+    
+    This is the inverse of extract_coords, and is used instead of relying 
+    on the default str() of a numpy array or Python list: numpy inserts 
+    line-wrapping newlines into str() output once an array gets long enough 
+    (which real polygons with several vertices can easily reach), and a 
+    plain Python list's str() uses commas between values, both of which 
+    would corrupt a comma-delimited CSV row. This function guarantees a 
+    single-line, comma-free, whitespace-separated representation no matter 
+    how many vertices the shape has. 
+    
+    Args:
+      coords: A flat, iterable sequence of numbers (x1, y1, x2, y2, ...). 
+      
+    Returns:
+      str: The coordinates formatted as "[v1 v2 v3 ...]". 
+    """
+    return "[" + " ".join(str(float(value)) for value in coords) + "]"
+
 def change_to_folder(folder_path):
     # it is BAD PRACTICE to do directory management like this
     # but sometimes you gotta do what you gotta do
