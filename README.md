@@ -29,7 +29,7 @@ The overall goal is to provide a streamlined process from raw satellite data to 
 ## Installation
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/nicoarrroyo/OpenResIN.git](https://github.com/nicoarrroyo/OpenResIN.git)
+    git clone https://github.com/nicoarrroyo/OpenResIN.git
     cd OpenResIN
     ```
 
