@@ -1,1 +1,1 @@
-trained models saved by the program will go here. this folder starts off empty. no need to change anything here :)
+This is an output data folder, meaning you don't need to put anything in here yourself. Any models trained using the `krisp_trainer` script will be automatically saved here. Then, when the model is deployed with the `krispy` script, it will be searched for here as well. Models will be saved as TensorFlow Keras models (e.g. `ndwi model epochs-100.keras`). For more information, visit the README file in the `models/` directory.
