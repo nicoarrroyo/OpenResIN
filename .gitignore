@@ -1,10 +1,3 @@
-# OpenResIN-specific
-data/sat-images/*/
-!data/sat-images/README.md
-
-data/masks/*/*
-!data/masks/*/.keep
-
 # Based on https://github.com/github/gitignore/blob/main/Python.gitignore
 # Sections for tools not used in this project have been removed.
 
@@ -102,8 +95,12 @@ dmypy.json
 *.kdev4
 
 # Data and model artifacts
-#   Git stores every version of a large binary file forever, and deleting it in
-#   a later commit does not shrink the repository. Datasets, database dumps and
-#   trained models belong outside version control. Add patterns here as soon as
-#   this project starts producing or downloading them.
+data/sat-images/*/
+!data/sat-images/README.md
+
+data/masks/*/*
+!data/masks/*/.keep
+
+# Other
+unused/
 
