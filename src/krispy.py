@@ -50,7 +50,7 @@ stop_event, thread = start_spinner(message="pre-run preparation")
 #folder = ("S2C_MSIL2A_20250331T110651_N0511_R137_T31UCU_20250331T143812.SAFE")
 
 folder = ("S2C_MSIL2A_20250301T111031_N0511_R137_T31UCU_20250301T152054.SAFE")
-folder_path = os.path.join(HOME, "data", "Sentinel 2", folder)
+folder_path = os.path.join(HOME, "data", "sat-images", folder)
 
 (sentinel_name, instrument_and_product_level, datatake_start_sensing_time, 
  processing_baseline_number, relative_orbit_number, tile_number_field, 

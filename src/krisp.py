@@ -187,7 +187,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
         global response_time
         
         # %%% i. Find the Relevant Folders
-        folders_path = os.path.join(HOME, "data", sat-images)
+        folders_path = os.path.join(HOME, "data", "sat-images")
         folders = list_folders(folders_path)
         # %%% 1. Opening Images and Creating Image Arrays
         for folder in folders:
