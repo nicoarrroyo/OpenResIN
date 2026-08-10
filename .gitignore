@@ -100,7 +100,3 @@ data/sat-images/*/
 
 data/masks/*/*
 !data/masks/*/.keep
-
-# Other
-unused/
-
