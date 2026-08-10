@@ -17,6 +17,8 @@ import rasterio
 from omnicloudmask import predict_from_array
 
 # %%% ii. Import Internal Functions
+import krisp_config as c
+
 from data_handling import change_to_folder, extract_chunk_details
 from data_handling import sort_prediction_results, sort_file_names
 from data_handling import check_positive_int
@@ -532,7 +534,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
     height = int(157 / mc_per_len)
     width = int(157 / mc_per_len)
     
-    models_path = os.path.join(HOME, "data", "saved_models")
+    models_path = c.MODELS_DIR
     model_names = os.listdir(models_path)
     found_model = False
     for name in model_names:
