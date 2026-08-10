@@ -71,8 +71,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
     stop_event, thread = start_spinner(message="checking for "
                                        "pre-existing files")
     start_time = time.monotonic()
-    satellite = "Sentinel 2"
-    path = os.path.join(HOME, "data", satellite, folder)
+    path = os.path.join(HOME, "data", "sat-images", folder)
     
     # %%%% 0.1 Chunk Check!
     test_data_path = os.path.join(path, "test data", f"ndwi_{max_multiplier}")
@@ -188,7 +187,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
         global response_time
         
         # %%% i. Find the Relevant Folders
-        folders_path = os.path.join(HOME, "data", satellite)
+        folders_path = os.path.join(HOME, "data", sat-images)
         folders = list_folders(folders_path)
         # %%% 1. Opening Images and Creating Image Arrays
         for folder in folders:
@@ -283,7 +282,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
             print("masking out known features")
             start_time = time.monotonic()
             
-            masking_path = os.path.join(HOME, "data", "Masking")
+            masking_path = os.path.join(HOME, "data", "masks")
             
             rivers_data = os.path.join(
                 masking_path, 
