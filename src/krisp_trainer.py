@@ -10,7 +10,12 @@ import matplotlib.pyplot as plt
 import krisp_config as c
 import krisp_operations as operation
 from user_interfacing import start_spinner, end_spinner, list_folders
-folder = list_folders(c.DATA_DIR)
+
+# list_folders returns every .SAFE tile it recognises, so take the first.
+# Same convention as epoch_pathfinder.py, which trains off the same data.
+# Upcoming change is adopting compositing like NALIRA. 
+folders_path = os.path.join(c.DATA_DIR, "sat-images")
+folder = list_folders(folders_path)[0]
 
 MAIN_START_TIME = time.monotonic()
 
@@ -19,9 +24,9 @@ print("----------")
 print("| STEP 1 |")
 print("----------")
 training_data_path = os.path.join(
-    c.DATA_DIR, "sat-images", c.SENTINEL_FOLDER, 
+    folders_path, folder,
     "training data", "training_data_1.tfrecord")
-model_save_dir = os.path.join(c.DATA_DIR, "saved-models")
+model_save_dir = c.MODELS_DIR
 
 if not os.path.exists(training_data_path):
     print(f"error: training data not found at {training_data_path}")
