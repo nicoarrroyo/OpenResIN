@@ -95,9 +95,9 @@ To run the entire pipeline, follow these steps sequentially.
 ## Repository Structure
 This repository is organised into several key directories:
 
-- `data/`: Contains all the directories in which the user must put their raw and processed data for the project.
-	- `training-data/`: Directory for public, hand-labelled, seed training data.
-    	- `T31UCU-5000chunks.csv`: (Input) Stores the user-labeled data from NALIRA.
+- `data/`: Inputs. Contains all the directories in which the user must put their raw data for the project, plus the seed labels that ship with the repository.
+	- `seed-labels/`: Public, hand-labelled seed label data. Tracked by git, and read-only as far as the pipeline is concerned.
+    	- `T31UCU-5000chunks.csv`: Labelled chunk coordinates for tile T31UCU, used as a starting point so a fresh clone can train without labelling first.
     - `masks/`: Directory for user to organise masking files.
         - `boundaries/`: Country boundary masks.
         - `known-reservoirs/`: Masks for known reservoirs.
@@ -105,6 +105,11 @@ This repository is organised into several key directories:
         - `terrain/`: Terrain level / gradient masks.
         - `urban-areas/`: Urban area (cities, towns, etc.) masks.
     - `sat-images/`: Directory for user-downloaded Sentinel-2 satellite imagery.
+
+- `outputs/`: Everything the pipeline generates. Not tracked by git; arrives empty on a fresh clone.
+    - `labels/`: Label coordinates from your own labelling sessions, kept separate from the tracked seed set.
+    - `patches/`: Segmented training images, one sub-folder per class.
+    - `predictions/`: Model predictions across a whole tile.
 
 - `models/`: Stores trained model versions (initially empty).
 

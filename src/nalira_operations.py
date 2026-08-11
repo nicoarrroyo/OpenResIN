@@ -3,6 +3,7 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import csv
 import datetime as dt
+import shutil
 import sys
 import time
 
@@ -405,23 +406,27 @@ def six_prepare_data(folders, prefix):
     # 6.1 Preparing File for Labelling
     break_flag = False
     
-    # check for a responses folder
-    data_folder_found = False
-    for folder in folders:
-        if data_folder_found:
-            break
-        
-        if os.path.exists(os.path.join(c.DATA_DIR, "training-data")):
-            data_folder_found = True
-            labelling_path = os.path.join(c.DATA_DIR, "training-data")
-    
-    if not data_folder_found:
-        labelling_path = os.path.join(c.DATA_DIR, "training-data")
-        os.makedirs(labelling_path, exist_ok=True)
-    
+    # Labels produced by this session go to outputs/, never to the tracked
+    # seed set in data/seed-labels/. The seed is opened read-only: if there is
+    # no working file for this tile yet, it is copied out and every subsequent
+    # write lands on the copy. That is what stops a labelling session from
+    # showing up as a modification to a tracked file.
+    os.makedirs(c.LABELS_DIR, exist_ok=True)
+
     data_file_name_prefix = f"{prefix.split('_')[0]}"
     data_file_name = f"{data_file_name_prefix}-{c.DATA_FILE_NAME_SUFFIX}"
-    data_file_path = os.path.join(labelling_path, data_file_name)
+    data_file_path = os.path.join(c.LABELS_DIR, data_file_name)
+
+    if not os.path.exists(data_file_path):
+        seed_file_path = os.path.join(c.SEED_LABELS_DIR, data_file_name)
+        if os.path.exists(seed_file_path):
+            shutil.copyfile(seed_file_path, data_file_path)
+            print(f"copied seed labels for {data_file_name_prefix} from "
+                  f"{os.path.relpath(seed_file_path, c.HOME_DIR)}")
+        else:
+            print(f"no seed labels found for {data_file_name_prefix}, "
+                  "starting a new file")
+
     data_do.blank_entry_check(file=data_file_path) # remove all blank entries
     
     # 6.1.1 File validity check
@@ -506,7 +511,7 @@ def six_prepare_data(folders, prefix):
         i = invalid_rows[0]
     print(f"step 6 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return [break_flag, i, data_file_path, data_correction, 
-            invalid_rows, lines, last_chunk, labelling_path]
+            invalid_rows, lines, last_chunk]
 
 # %%
 def lp_chunk_processing(imgs, i):
@@ -766,7 +771,7 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
     return index_chunks
 
 # %% 8. Data segmentation
-def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
+def eight_segment_data(data_file_path, index_chunks, patches_path, prefix):
     """
     Segments labelled chunks into individual training images and saves them 
     by class.
@@ -781,7 +786,7 @@ def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
         data_file_path (str): Path to the labelled CSV file containing 
         coordinates.
         index_chunks (list): List of split NDWI chunk arrays.
-        labelling_path (str): Directory where the segmented class folders 
+        patches_path (str): Directory where the segmented class folders
         will be saved.
         prefix (str): Image prefix used for naming the saved PNG files.
     """
@@ -869,7 +874,7 @@ def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
         print(f"{len(coords_list)} examples for class '{class_name}'")
 
         # create class sub-folder
-        class_dir = os.path.join(labelling_path, class_name)
+        class_dir = os.path.join(patches_path, class_name)
         os.makedirs(class_dir, exist_ok=True)
 
         # find the highest existing image index to avoid overwriting
@@ -933,7 +938,7 @@ def eight_segment_data(data_file_path, index_chunks, labelling_path, prefix):
 
         saved_counts[class_name] = saved
         print(f"saved {saved} images to "
-              f"{os.path.relpath(class_dir, labelling_path)}/")
+              f"{os.path.relpath(class_dir, patches_path)}/")
 
     total = sum(saved_counts.values())
     print(f"saved {total} PNG training images across "

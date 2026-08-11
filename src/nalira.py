@@ -175,9 +175,8 @@ if c.LABEL_DATA:
      data_file_path, 
      data_correction, 
      invalid_rows, 
-     lines, 
-     last_chunk, 
-     labelling_path
+     lines,
+     last_chunk
      ] = operation.six_prepare_data(
          folders, 
          prefix
@@ -211,9 +210,9 @@ print("| STEP 8 |")
 print("----------")
 if not LP_MODE:
     operation.eight_segment_data(
-        data_file_path, 
-        index_chunks, 
-        labelling_path, 
+        data_file_path,
+        index_chunks,
+        c.PATCHES_DIR,
         prefix
         )
 elif LP_MODE:

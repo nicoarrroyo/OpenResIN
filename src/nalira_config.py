@@ -36,6 +36,14 @@ SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 HOME_DIR = os.path.dirname(SRC_DIR)
 
 DATA_DIR = os.path.join(HOME_DIR, "data")
+
+SEED_LABELS_DIR = os.path.join(DATA_DIR, "seed-labels")
+
+OUTPUTS_DIR = os.path.join(HOME_DIR, "outputs")
+
+LABELS_DIR = os.path.join(OUTPUTS_DIR, "labels")
+
+PATCHES_DIR = os.path.join(OUTPUTS_DIR, "patches")
 # --- Paths ---
 
 # --- Constants ---
