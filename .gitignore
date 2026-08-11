@@ -94,9 +94,20 @@ dmypy.json
 .kdev4/
 *.kdev4
 
-# Data and model artifacts
-data/sat-images/*/
+# User-supplied inputs
+#   Contents are ignored, documentation is kept. data/seed-labels/ has no rule
+#   here on purpose: the hand-labelled seed CSVs are fixtures and are meant to
+#   be tracked. Seed and generated labels are separated by directory, not by
+#   filename, so no negation rules are needed to tell them apart.
+data/sat-images/*
 !data/sat-images/README.md
 
 data/masks/*/*
 !data/masks/*/.keep
+
+# Generated artifacts
+outputs/*
+!outputs/README.md
+
+models/*
+!models/README.md
