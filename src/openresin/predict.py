@@ -16,12 +16,12 @@ from matplotlib import cm
 from collections import Counter
 
 # %%% ii. Import Internal Functions
-from KRISP import run_model
-from data_handling import check_file_permission, blank_entry_check
-from data_handling import deduplicate_by_max_confidence
-from image_handling import image_to_array
-from misc import convert_seconds_to_hms
-from user_interfacing import start_spinner, end_spinner, confirm_continue_or_exit
+from .inference import run_model
+from .data_handling import check_file_permission, blank_entry_check
+from .data_handling import deduplicate_by_max_confidence
+from .image_handling import image_to_array
+from .misc import convert_seconds_to_hms
+from .user_interfacing import start_spinner, end_spinner, confirm_continue_or_exit
 
 # %%% iii. Directory Management
 HOME = os.path.dirname(os.getcwd()) # HOME path is one level up from the cwd

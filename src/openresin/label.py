@@ -53,11 +53,11 @@ Outputs:
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__))) # fix working directory
 import numpy as np
-import nalira_operations as operation
-import user_interfacing as ui_do
-from misc import pre_run_checks#, lp_check
+from . import labelling as operation
+from . import user_interfacing as ui_do
+from .misc import pre_run_checks#, lp_check
 
-import nalira_config as c
+from . import nalira_config as c
 
 folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
 folders = ui_do.list_folders(folders_path)

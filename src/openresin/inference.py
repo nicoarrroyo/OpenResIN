@@ -17,19 +17,19 @@ import rasterio
 from omnicloudmask import predict_from_array
 
 # %%% ii. Import Internal Functions
-import krisp_config as c
+from . import krisp_config as c
 
-from data_handling import change_to_folder, extract_chunk_details
-from data_handling import sort_prediction_results, sort_file_names
-from data_handling import check_positive_int
+from .data_handling import change_to_folder, extract_chunk_details
+from .data_handling import sort_prediction_results, sort_file_names
+from .data_handling import check_positive_int
 
-from image_handling import image_to_array, plot_indices, save_image_file
-from image_handling import known_feature_mask, mask_urban_areas
+from .image_handling import image_to_array, plot_indices, save_image_file
+from .image_handling import known_feature_mask, mask_urban_areas
 
-from misc import get_sentinel_bands, split_array
+from .misc import get_sentinel_bands, split_array
 
-from user_interfacing import start_spinner, end_spinner, list_folders
-from user_interfacing import confirm_continue_or_exit
+from .user_interfacing import start_spinner, end_spinner, list_folders
+from .user_interfacing import confirm_continue_or_exit
 
 # %%% Directory, Plot, and Model Configuration Properties
 dpi = 3000 # 3000 for full resolution, below 1000, images become fuzzy

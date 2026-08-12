@@ -20,7 +20,9 @@ SRC_DIR         = os.path.dirname(os.path.abspath(__file__))
 HOME_DIR        = os.path.dirname(SRC_DIR)
 DATA_DIR        = os.path.join(HOME_DIR, "data")
 
-# Trained models are written here by krisp_trainer and read back by krisp.
+# Trained models are written here by krisp_trainer (now called train) and
+# read back by krisp (now called inference). Both names will be definitively
+# updated later on - TODO
 # Single source of truth: both sides must import this rather than rebuilding
 # the path, which is how they came to disagree in the first place.
 MODELS_DIR      = os.path.join(HOME_DIR, "models")

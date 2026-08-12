@@ -12,12 +12,12 @@ import numpy as np
 from PIL import Image
 
 # %% Local Libraries
-import data_handling as data_do
-import image_handling as image_do
-import misc
-import user_interfacing as ui_do
+from . import data_handling as data_do
+from . import image_handling as image_do
+from . import misc
+from . import user_interfacing as ui_do
 
-import nalira_config as c
+from . import nalira_config as c
 
 # %% 1. Creating image arrays (iterative)
 def one_create_image_arrays(folders_path, folder, tci_60_array):

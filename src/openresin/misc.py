@@ -1,8 +1,8 @@
 import numpy as np
 import random
 import math
-import nalira_config as c
-import user_interfacing as ui_do
+from . import nalira_config as c
+from . import user_interfacing as ui_do
 
 def pre_run_checks():
     print("CONDUCTING PRE-RUN CHECKS")
@@ -350,7 +350,7 @@ def logical_checks(high_res, show_index_plots, save_images, label_data):
     return high_res, show_index_plots, save_images, label_data
 
 from matplotlib import pyplot as plt
-from data_handling import check_duplicate_name
+from .data_handling import check_duplicate_name
 def save_image_file(data, image_name, normalise):
     if normalise:
         cmap = plt.get_cmap("viridis")

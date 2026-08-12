@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, Sequential
-import krisp_config as c
+from . import krisp_config as c
 
 # %% 3. Load and prepare dataset
 def three_load_dataset(training_data_path):

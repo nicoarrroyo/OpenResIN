@@ -7,9 +7,9 @@ import time
 import sys
 import matplotlib.pyplot as plt
 
-import krisp_config as c
-import krisp_operations as operation
-from user_interfacing import start_spinner, end_spinner, list_folders
+from . import krisp_config as c
+from . import modelling as operation
+from .user_interfacing import start_spinner, end_spinner, list_folders
 
 # list_folders returns every .SAFE tile it recognises, so take the first.
 # Same convention as epoch_pathfinder.py, which trains off the same data.
@@ -37,7 +37,7 @@ print("paths validated")
 print("----------")
 print("| STEP 2 |")
 print("----------")
-from user_interfacing import table_print
+from .user_interfacing import table_print
 table_print(
     model_type=c.MODEL_TYPE, epochs=c.EPOCHS,
     img_size=f"{c.IMG_HEIGHT}x{c.IMG_WIDTH}",

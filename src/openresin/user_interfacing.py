@@ -6,7 +6,7 @@ import tkinter as tk
 import numpy as np
 import os
 from collections import defaultdict
-import nalira_config as c
+from . import nalira_config as c
 
 def table_print(**kwargs):
     """
@@ -76,7 +76,7 @@ def list_folders(folders_path):
     
     if c.N_IMAGES < -1 or not isinstance(c.N_IMAGES, int):
         print(f"WARNING: N_IMAGES has a bad value: {c.N_IMAGES}")
-        print("Check config_NALIRA file to fix")
+        print("Check nalira_config file to fix") # TODO eventually rename
         sys.exit(1)
     elif c.N_IMAGES == -1:
         n_images = len(folders)

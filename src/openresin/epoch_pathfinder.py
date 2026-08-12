@@ -1,8 +1,8 @@
-from krisp_operations import three_load_dataset, four_build_model
-import krisp_config as c
+from .modelling import three_load_dataset, four_build_model
+from . import krisp_config as c
 import numpy as np
 import matplotlib.pyplot as plt
-import user_interfacing as ui_do
+from . import user_interfacing as ui_do
 import os
 
 EPOCH_SETTINGS = list(range(50, 175, 25))

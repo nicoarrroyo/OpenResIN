@@ -4,7 +4,7 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from data_handling import extract_coords
+from .data_handling import extract_coords
 
 def update_counts(class_predictions, class_n, tp, tn, fp, fn):
     if class_predictions == class_n:
