@@ -5,6 +5,8 @@ Image.MAX_IMAGE_PIXELS = 150_000_000
 from matplotlib import pyplot as plt
 from matplotlib import colors
 
+from .data_handling import check_duplicate_name
+
 def image_to_array(file_path_s):
     """
     Convert an image or list of images to a numpy array. The image is opened 
@@ -387,6 +389,89 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i,
         hspace=0.01
     )
     plt.show()
+
+def save_image_file(data, image_name, normalise, coordinates,
+                    g_min, g_max, dupe_check):
+    """
+    Crop a patch out of a chunk and write it to disk as a PNG.
+
+    Restored from commit a0c744f, where it was commented out during the
+    TFRecord experiment and never reinstated when NALIRA reverted to PNGs.
+    Behaviour is unchanged apart from the duplicate check, which used to scan
+    the working directory; callers now pass a full path in image_name, so the
+    directory to scan is derived from it.
+
+    Parameters
+    ----------
+    data : numpy array, shape (H, W)
+        A single chunk to crop from. Note this differs from get_ndwi_patch
+        below, which takes a list of chunks plus an index.
+    image_name : str
+        Full path to write to, including the filename.
+    normalise : bool
+        Apply the viridis colormap over [g_min, g_max]. False passes the data
+        through as uint8, used for TCI patches that are already 8-bit.
+    coordinates : sequence of 4 floats
+        [ulx, uly, lrx, lry] in pixels, clamped to the data's bounds.
+    dupe_check : bool
+        Skip the write if a file of the same name is already in the directory.
+    """
+    # check for duplicate file name (prevent overwriting)
+    if dupe_check:
+        duplicates = check_duplicate_name(
+            search_dir=os.path.dirname(image_name),
+            file_name=os.path.basename(image_name))
+    else:
+        duplicates = False
+    if not duplicates: # only create a new image if there is not one already
+        ulx, uly, lrx, lry = coordinates
+        iulx, iuly, ilrx, ilry = int(ulx), int(uly), int(lrx), int(lry)
+
+        # Ensure indices are within bounds AFTER potential rounding
+        iulx = max(0, iulx)
+        iuly = max(0, iuly)
+        ilrx = min(data.shape[1], ilrx) # Use actual data dimensions
+        ilry = min(data.shape[0], ilry)
+
+        # Crop the data
+        cropped_data = data[iuly:ilry, iulx:ilrx]
+
+        if normalise:
+            # Ensure cropped_data is not empty before normalization
+            if cropped_data.size == 0:
+                return # Skip saving empty images
+
+            # Check for all-NaN slices after cropping
+            if np.all(np.isnan(cropped_data)):
+                # Create a black image of the expected type/channels
+                # Assuming RGBA output from cmap
+                final_data = np.zeros((*cropped_data.shape, 4), dtype=np.uint8)
+            else:
+                # Proceed with normalization and colormapping
+                norm = plt.Normalize(g_min, g_max)
+                cmap = plt.get_cmap("viridis")
+                rgba_data = cmap(norm(cropped_data))
+                final_data = (255 * rgba_data).astype(np.uint8)
+        else:
+            # Handle non-normalised data (e.g. TCI) - needs uint8 conversion
+            # if not already
+            if cropped_data.dtype != np.uint8:
+                if np.issubdtype(cropped_data.dtype, np.floating):
+                    # Assuming float 0-1 range
+                    final_data = (255 * np.clip(cropped_data, 0, 1)).astype(
+                        np.uint8)
+                else: # Direct cast if integer type
+                    final_data = cropped_data.astype(np.uint8)
+            else:
+                final_data = cropped_data # Already uint8
+
+        # Save the image
+        try:
+            Image.fromarray(final_data).save(image_name)
+        except Exception as e:
+            print(f"Error saving image {image_name}: {e}")
+            print(f"Data shape: {final_data.shape}, "
+                  f"Data type: {final_data.dtype}")
 
 def get_ndwi_patch(data, chunk_n, coordinates, g_min, g_max):
     """
