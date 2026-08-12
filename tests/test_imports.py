@@ -7,19 +7,27 @@ import pytest
 PKG_DIR = Path(__file__).resolve().parents[1] / "src" / "openresin"
 
 # Modules with no import-time side effects, so a test can safely import them.
-# The "pipeline" scripts are excluded because the __main__ improvement is not 
-# implemented yet. Should come in the next commit :)
+# The four pipeline scripts joined this list once their bodies moved into
+# main(): before that, importing label.py opened a tkinter GUI and importing
+# train.py started a training run.
 IMPORTABLE = [
     "data_handling",
     "evaluate",
     "image_handling",
     "inference",
     "krisp_config",
+    "label",
     "misc",
     "modelling",
     "nalira_config",
+    "predict",
+    "train",
     "user_interfacing",
 ]
+
+# The stages pyproject.toml promises as console scripts. Each must expose a
+# main() for `pip install -e .` to generate a working launcher.
+STAGES = ["label", "train", "predict", "evaluate"]
 
 
 def _parse_all():
@@ -132,3 +140,39 @@ def test_imports_without_side_effects(module_name):
     assert os.getcwd() == before, (
         f"importing openresin.{module_name} changed the working directory "
         f"from {before} to {os.getcwd()}")
+
+
+@pytest.mark.parametrize("module_name", STAGES)
+def test_stage_exposes_main(module_name):
+    """Every console script in pyproject.toml resolves to a callable main().
+
+    `openresin-label = "openresin.label:main"` is a promise pip keeps by
+    importing the module and calling that attribute, so a missing or renamed
+    main() breaks the installed command while the module itself still imports
+    cleanly. Nothing else would notice.
+    """
+    import importlib
+
+    module = importlib.import_module(f"openresin.{module_name}")
+    assert callable(getattr(module, "main", None)), (
+        f"openresin.{module_name} has no callable main(), so its console "
+        f"script in pyproject.toml would fail on invocation")
+
+
+@pytest.mark.parametrize("module_name", STAGES)
+def test_stage_help_does_not_run_the_pipeline(module_name):
+    """--help must print usage and exit, without touching data or the cwd.
+
+    This is the cheap end-to-end check that the argparse conversion actually
+    took: a stage that still did its work at import time would run it here.
+    """
+    import importlib
+
+    module = importlib.import_module(f"openresin.{module_name}")
+    before = os.getcwd()
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.build_parser().parse_args(["--help"])
+
+    assert excinfo.value.code == 0
+    assert os.getcwd() == before

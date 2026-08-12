@@ -2,10 +2,11 @@ import os
 
 # -- Model Settings --
 MODEL_TYPE      = "ndwi"    # "ndwi" or "tci"
-EPOCHS          = 500
+EPOCHS          = 150
 LEARNING_RATE   = 0.001
 DROPOUT_RATE    = 0.2
 SAVE_MODEL      = False
+SHOW_PLOTS      = False     # accuracy/loss curves after training
 
 # -- Dataset Parameters --
 IMG_HEIGHT      = int(157 / 5)  # must match BOX_SIZE in data_handling

@@ -1,6 +1,7 @@
 """ KRISP External Technical Testing Environment (KRISPETTE)
 """
 
+import argparse
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -179,14 +180,35 @@ def get_confusion_matrix(model_epochs, confidence_threshold,
     
     return metrics_res, metrics_bod, metrics_land, metrics_sea
 
-if __name__ == "__main__":
-    model_epochs = 150 # 150 for ndwi, 151 for tci on nico personal pc
-    conf_thresh = 40
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="openresin-evaluate",
+        description=("Score a set of predictions against the recorded "
+                     "responses for the same tile."))
+    parser.add_argument(
+        "--model-epochs", type=int, default=150,
+        help="epoch count in the predictions filename "
+             "(150 for ndwi, 151 for tci; default: %(default)s)")
+    parser.add_argument(
+        "--confidence-threshold", type=float, default=40,
+        help="minimum confidence for a prediction to count (default: "
+             "%(default)s)")
+    parser.add_argument(
+        "--folder", default=DEFAULT_FOLDER,
+        help="the .SAFE folder under data/sat-images holding both files")
+    return parser
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    model_epochs = args.model_epochs
+    conf_thresh = args.confidence_threshold
+
     m_res, m_bod, m_land, m_sea = get_confusion_matrix(
-        model_epochs=model_epochs, 
-        confidence_threshold=conf_thresh
+        model_epochs=model_epochs,
+        confidence_threshold=conf_thresh,
+        folder=args.folder
         )
-    
+
     # --- Prepare data for plotting ---
     labels = ["Accuracy", "Precision", "Recall", "Specificity", "F1-Score"]
     reservoir_scores = list(m_res)
@@ -234,3 +256,7 @@ if __name__ == "__main__":
     
     fig.tight_layout() # Adjust layout
     plt.show()
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())
