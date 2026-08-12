@@ -4,7 +4,15 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from . import krisp_config as c
 from .data_handling import extract_coords
+
+# The tile these recorded responses and predictions belong to. Kept as a
+# module constant because both filenames below are tied to this one scene.
+# This tile is not installed on my system anymore but that will probably be
+# fixed when i change to a better metric evaluation method (pending feeback).
+DEFAULT_FOLDER = (
+    "S2C_MSIL2A_20250331T110651_N0511_R137_T31UCU_20250331T143812.SAFE")
 
 def update_counts(class_predictions, class_n, tp, tn, fp, fn):
     if class_predictions == class_n:
@@ -51,21 +59,19 @@ def get_metrics(tp, tn, fp, fn, tot_predicts):
         f1 = 100
     return acc, prec, recall, spec, f1
 
-def get_confusion_matrix(model_epochs, confidence_threshold):
-    os.chdir(
-        os.path.join(
-            "C:\\", "Users", "nicol", "Documents", "UoM", "YEAR 3", 
-            "Individual Project", "data", "Sentinel 2", 
-            "S2C_MSIL2A_20250331T110651_N0511_R137_T31UCU_20250331T143812.SAFE"
-            )
-        )
-    
+def get_confusion_matrix(model_epochs, confidence_threshold,
+                         folder=DEFAULT_FOLDER):
+    folder_path = os.path.join(c.DATA_DIR, "sat-images", folder)
+
     # responses file
-    with open("responses_5000_chunks.csv", mode="r") as file:
+    responses_path = os.path.join(folder_path, "responses_5000_chunks.csv")
+    with open(responses_path, mode="r") as file:
         responses = file.readlines()[1:1650]
-    
+
     # predictions file
-    with open (f"P_5000_{model_epochs}_T31UCU.csv", mode="r") as file:
+    predictions_path = os.path.join(
+        folder_path, f"P_5000_{model_epochs}_T31UCU.csv")
+    with open(predictions_path, mode="r") as file:
         predictions = file.readlines()[2:len(responses)+2]
     
     tp_res = 0 # true positive

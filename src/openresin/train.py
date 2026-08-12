@@ -2,7 +2,6 @@
 Keras Reservoir Identification Sequential Platform - Trainer
 """
 import os
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import time
 import sys
 import matplotlib.pyplot as plt

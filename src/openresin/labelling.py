@@ -1,6 +1,5 @@
 # %% Standard Libraries
 import os
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import csv
 import datetime as dt
 import shutil

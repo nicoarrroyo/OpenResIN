@@ -19,7 +19,7 @@ from omnicloudmask import predict_from_array
 # %%% ii. Import Internal Functions
 from . import krisp_config as c
 
-from .data_handling import change_to_folder, extract_chunk_details
+from .data_handling import ensure_folder, extract_chunk_details
 from .data_handling import sort_prediction_results, sort_file_names
 from .data_handling import check_positive_int
 
@@ -45,7 +45,7 @@ label_size = 4
 plot_size = (5, 5) # larger plots increase detail and pixel count
 plot_size_chunks = (6, 6)
 
-HOME = os.path.dirname(os.getcwd()) # HOME path is one level up from the cwd
+HOME = c.HOME_DIR # repo root, resolved from the config's own file location
 
 class_names = ["land", "reservoirs", "sea", "water bodies"]
 batch_size = 512
@@ -108,8 +108,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
                 generate_chunks = True
                 print("starting chunk generation process")
                 # create the directory
-                change_to_folder(test_data_path)
-                os.chdir(HOME)
+                ensure_folder(test_data_path)
                 break
             elif user_input in ["n", "no"]:
                 generate_chunks = False
@@ -480,8 +479,8 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
         
         # %%%% 6.2 Create and Save Mini-Chunks
         print("saving chunks as image files")
-        change_to_folder(test_data_path)
-                
+        ensure_folder(test_data_path)
+
         for i, chunk in enumerate(ndwi_chunks):
             if i > real_n_chunks:
                 print("WARNING: Exceeded expected number of chunks "
@@ -500,7 +499,11 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
             mc_idx = 0 # mini-chunk index
             for j, ulx in enumerate(ulx_s):
                 for k, uly in enumerate(uly_s):
-                    image_name = (f"ndwi chunk {i} minichunk {mc_idx}.png")
+                    # full path, not a bare name: the writer no longer runs
+                    # with test_data_path as the working directory
+                    image_name = os.path.join(
+                        test_data_path,
+                        f"ndwi chunk {i} minichunk {mc_idx}.png")
                     mini_chunk_coord = [
                         float(ulx),                 # ulx
                         float(uly),                 # uly

@@ -246,16 +246,13 @@ def extract_coords(coord_string, create_box_flag):
         coordinates = []
     return coordinates
 
-def change_to_folder(folder_path):
-    # it is BAD PRACTICE to do directory management like this
-    # but sometimes you gotta do what you gotta do
-    if os.path.exists(folder_path):
-        os.chdir(folder_path)
-    else:
+def ensure_folder(folder_path):
+    """Create folder_path if it does not exist. Callers pass absolute paths
+    and keep using them; nothing here changes the working directory."""
+    if not os.path.exists(folder_path):
         os.makedirs(folder_path)
-        os.chdir(folder_path)
-        path_name = folder_path.split("\\")
-        print(f"created folder named '{path_name[-1]}' in '{path_name[-2]}'")
+        parent, name = os.path.split(folder_path)
+        print(f"created folder named '{name}' in '{os.path.basename(parent)}'")
 
 def check_duplicate_name(search_dir, file_name):
     duplicates = False

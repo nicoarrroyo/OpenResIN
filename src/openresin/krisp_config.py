@@ -16,8 +16,10 @@ RANDOM_SEED     = 123
 CLASS_NAMES     = ["land", "reservoirs", "sea", "water bodies"]
 
 # -- Paths --
-SRC_DIR         = os.path.dirname(os.path.abspath(__file__))
-HOME_DIR        = os.path.dirname(SRC_DIR)
+# Anchored on this file's location, never on the working directory, so the
+# stages resolve the same paths no matter where they are launched from.
+PKG_DIR         = os.path.dirname(os.path.abspath(__file__))    # src/openresin
+HOME_DIR        = os.path.dirname(os.path.dirname(PKG_DIR))     # repo root
 DATA_DIR        = os.path.join(HOME_DIR, "data")
 
 # Trained models are written here by krisp_trainer (now called train) and

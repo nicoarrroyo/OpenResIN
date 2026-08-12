@@ -16,6 +16,7 @@ from matplotlib import cm
 from collections import Counter
 
 # %%% ii. Import Internal Functions
+from . import krisp_config as c
 from .inference import run_model
 from .data_handling import check_file_permission, blank_entry_check
 from .data_handling import deduplicate_by_max_confidence
@@ -24,7 +25,7 @@ from .misc import convert_seconds_to_hms
 from .user_interfacing import start_spinner, end_spinner, confirm_continue_or_exit
 
 # %%% iii. Directory Management
-HOME = os.path.dirname(os.getcwd()) # HOME path is one level up from the cwd
+HOME = c.HOME_DIR # repo root, resolved from the config's own file location
 
 n_chunks = 5000 # do not change!!
 confidence_threshold = 40 # do not change!! these are calculated
@@ -73,7 +74,6 @@ predictions_file = f"P_{n_chunks}_{model_epochs}_{tile_number_field}.csv"
 minichunk_header = ",minichunks,"
 chunk_header = "chunk," + ",".join(map(str, range(25)))
 
-#os.chdir(os.path.join(HOME, "Sentinel 2", folder))
 predictions_file_path = os.path.join(folder_path, predictions_file)
 
 # %% find biggest chunk
@@ -360,7 +360,6 @@ print("=== KRISP RUN COMPLETE ===\n")
 
 # %% write the results
 stop_event, thread = start_spinner(message="aftercare")
-# os.chdir(os.path.join(HOME, "Sentinel 2", folder))
 check_file_permission(predictions_file_path)
 blank_entry_check(predictions_file_path)
 

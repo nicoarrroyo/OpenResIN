@@ -31,9 +31,11 @@ N_IMAGES                = 1         # number of the found images to use (-1 for 
 # --- Processing Settings ---
 
 # --- Paths ---
-SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+# Anchored on this file's location, never on the working directory, so the
+# stages resolve the same paths no matter where they are launched from.
+PKG_DIR = os.path.dirname(os.path.abspath(__file__))    # src/openresin
 
-HOME_DIR = os.path.dirname(SRC_DIR)
+HOME_DIR = os.path.dirname(os.path.dirname(PKG_DIR))    # repo root
 
 DATA_DIR = os.path.join(HOME_DIR, "data")
 

@@ -51,7 +51,6 @@ Outputs:
 """
 # %% Start
 import os
-os.chdir(os.path.dirname(os.path.abspath(__file__))) # fix working directory
 import numpy as np
 from . import labelling as operation
 from . import user_interfacing as ui_do
