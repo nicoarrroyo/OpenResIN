@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openresin"
+version = "2.0"
+dependencies = [
+	"numpy",
+	"matplotlib",
+	"Pillow",
+	"tensorflow>=2.16", # for updated keras saving behaviour
+	"omnicloudmask",
+	"geopandas",
+	"fiona",
+	"rasterio",
+	"shapely"
+]
+requires-python = ">=3.11"
+
+description = "Open-source Reservoir Identification and Navigation tool"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [
+	{name = "Nicolas Renato Arroyo", email = "nicolas.renato.arroyo@gmail.com"}
+]
+
+[project.optional-dependencies]
+gpu = [
+	"cupy-cuda12x"
+]
+
+[project.scripts]
+openresin-label		= "openresin.label:main"
+openresin-train		= "openresin.train:main"
+openresin-predict	= "openresin.predict:main"
+openresin-evaluate	= "openresin.evaluate:main"
+
+[dependency-groups]
+dev = [
+	"pytest"
+]
+
+[project.urls]
+Repository = "https://github.com/nicoarrroyo/OpenResIN.git"

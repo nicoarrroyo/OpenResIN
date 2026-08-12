@@ -34,23 +34,21 @@ The overall goal is to provide a streamlined process from raw satellite data to 
     ```
 
 2.  **Install Required Libraries:**
-    This project requires Python (tested with 3.x) and several libraries. You can install them using pip:
+    This project requires Python (tested with 3.11) and several libraries. You can install them using pip:
     ```bash
-    pip install numpy matplotlib Pillow tensorflow pandas tqdm scikit-learn jupyter omnicloudmask geopandas fiona rasterio
+    pip install numpy matplotlib Pillow tensorflow omnicloudmask geopandas fiona rasterio shapely
     ```
     * `numpy`: For numerical operations and array handling.
     * `matplotlib`: For plotting graphs.
     * `Pillow`: For image manipulation.
     * `tensorflow`: The core machine learning library.
-    * `pandas`: Used for results handling.
-    * `tqdm`: For progress bars.
-    * `tkinter`: Usually included with Python standard library, used for the GUI in `nalira.py`.
-    * `scikit-learn`: For performance metrics.
-    * `jupyter`: For running notebooks.
+    * `tkinter`: Usually included with Python standard library, used for the GUI in `nalira.py`. If you don't have it, install it with your machine's package manager.
     * `omnicloudmask`: For cloud masking.
     * `geopandas`: For working with geospatial data.
     * `fiona`: For reading and writing geographic data files.
     * `rasterio`: For reading and writing raster datasets.
+    * `shapely`: For reading masking files.
+    * `cupy`: (optional, encouraged only for CUDA-compatible GPUs) For speeding up GPU-bound tasks like image compositing. Install with `pip install -e ".[gpu]""`.
 
 ## Usage Instructions
 To run the entire pipeline, follow these steps sequentially.
