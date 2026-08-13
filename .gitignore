@@ -96,6 +96,7 @@ dmypy.json
 
 # Generated files / directories
 .claude
+.mcp.json
 
 # User-supplied inputs
 #   Contents are ignored, documentation is kept. data/seed-labels/ has no rule
