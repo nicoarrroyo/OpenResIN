@@ -13,7 +13,7 @@ CLOUD_MASKING           = False
 
 COMPOSITING             = True
 
-SHOW_INDEX_PLOTS        = True
+SHOW_INDEX_PLOTS        = False
 
 SAVE_IMAGES             = False
 
