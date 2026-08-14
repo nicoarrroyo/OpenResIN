@@ -16,6 +16,12 @@ VALIDATION_SPLIT = 0.2
 RANDOM_SEED     = 123
 CLASS_NAMES     = ["land", "reservoirs", "sea", "water bodies"]
 
+# -- Default tile --
+# The scene predict and evaluate both fall back to when --folder is not given.
+# This will, in future, be replaced with an automated search for a tile. For now,
+# the goal is just to get it to run.
+DEFAULT_FOLDER  = "S2C_MSIL2A_20250301T111031_N0511_R137_T31UCU_20250301T152054.SAFE"
+
 # -- Paths --
 # Anchored on this file's location, never on the working directory, so the
 # stages resolve the same paths no matter where they are launched from.

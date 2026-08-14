@@ -10,12 +10,10 @@ import numpy as np
 from . import krisp_config as c
 from .data_handling import extract_coords
 
-# The tile these recorded responses and predictions belong to. Kept as a
-# module constant because both filenames below are tied to this one scene.
-# This tile is not installed on my system anymore but that will probably be
-# fixed when i change to a better metric evaluation method (pending feeback).
-DEFAULT_FOLDER = (
-    "S2C_MSIL2A_20250331T110651_N0511_R137_T31UCU_20250331T143812.SAFE")
+# The tile the recorded responses and predictions belong to. Shared with
+# predict.py via the config so the two stages chain by default; they used to
+# hold separate copies naming different scenes.
+DEFAULT_FOLDER = c.DEFAULT_FOLDER
 
 def update_counts(class_predictions, class_n, tp, tn, fp, fn):
     if class_predictions == class_n:
