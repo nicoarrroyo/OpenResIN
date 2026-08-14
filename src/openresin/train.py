@@ -124,6 +124,11 @@ def main(argv=None):
     print("----------")
     print(f"training for {c.EPOCHS} epochs")
     history = operation.five_train(model, train_ds, val_ds)
+    if not history:
+        # five_train swallows the exception and returns None, so this is the
+        # only place the failure can still reach the caller's exit code.
+        print("error: training did not complete, nothing was saved")
+        return 1
 
     # %% 6. Save
     print("----------")
