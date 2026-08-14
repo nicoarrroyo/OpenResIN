@@ -7,8 +7,6 @@ Image.MAX_IMAGE_PIXELS = 150_000_000
 from matplotlib import colors
 from matplotlib import pyplot as plt
 
-from .data_handling import check_duplicate_name
-
 
 def image_to_array(file_path_s):
     """
@@ -421,6 +419,8 @@ def save_image_file(data, image_name, normalise, coordinates,
     """
     # check for duplicate file name (prevent overwriting)
     if dupe_check:
+        # TF import out of module scope
+        from .data_handling import check_duplicate_name
         duplicates = check_duplicate_name(
             search_dir=os.path.dirname(image_name),
             file_name=os.path.basename(image_name))
