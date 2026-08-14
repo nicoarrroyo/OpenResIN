@@ -37,8 +37,10 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
         empty array.
         
     Returns:
-        list: Contains [image_arrays, image_metadata, 
-                        images_path, tci_array, tci_60_array].
+        list: Contains [image_arrays, image_metadata,
+                        prefix, tci_array, tci_60_array].
+        prefix is "{tile}_{sensing_time}" (e.g. "T31UCU_20240316T110811");
+        steps 6 and 8 split it to name the label file and the patch PNGs.
     """
     print(f"step 1 beginning at {dt.datetime.now().time():%H:%M:%S}")
     
@@ -106,10 +108,10 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
             tci_60_array = np.array(img.resize(size))
     
     print(f"step 1 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
-    return [image_arrays, 
-            image_metadata, 
-            images_path, 
-            tci_array, 
+    return [image_arrays,
+            image_metadata,
+            prefix,
+            tci_array,
             tci_60_array]
 
 # %% 2. Masking out known features (iterative)
