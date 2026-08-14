@@ -225,7 +225,12 @@ def main(argv=None):
 
         cmap = plt.get_cmap("coolwarm")
         all_confidences = [r[1] for r in sorted_res]
-        norm = plt.Normalize(min(all_confidences), max(all_confidences))
+        if all_confidences:
+            norm = plt.Normalize(min(all_confidences), max(all_confidences))
+        else:
+            # Nothing survived the threshold. Keep the colour scale valid so
+            # the tile still produces an (empty) map instead of crashing.
+            norm = plt.Normalize(confidence_threshold, 100)
 
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
@@ -278,23 +283,31 @@ def main(argv=None):
         sorted_confidences = sorted(confidence_counts.items())
 
         # Extract data for plotting
-        x_vals, y_vals = zip(*sorted_confidences)
+        if sorted_confidences:
+            x_vals, y_vals = zip(*sorted_confidences)
 
-        # Plot the histogram
-        plt.figure(figsize=(5, 3))
-        plt.bar(x_vals, y_vals, color='royalblue', edgecolor='black')
-        plt.xlabel("Confidence Level (%)")
-        plt.ylabel("Number of Reservoirs")
-        plt.title("Distribution of Confidence Levels for Predicted Reservoirs")
-        plt.xticks(range(min(x_vals), max(x_vals) + 5, 5))
+            # Plot the histogram
+            plt.figure(figsize=(5, 3))
+            plt.bar(x_vals, y_vals, color='royalblue', edgecolor='black')
+            plt.xlabel("Confidence Level (%)")
+            plt.ylabel("Number of Reservoirs")
+            plt.title(
+                "Distribution of Confidence Levels for Predicted Reservoirs")
+            plt.xticks(range(min(x_vals), max(x_vals) + 5, 5))
 
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        end_spinner(stop_event, thread)
-        plt.show()
+            plt.grid(axis='y', linestyle='--', alpha=0.7)
+            end_spinner(stop_event, thread)
+            plt.show()
+        else:
+            end_spinner(stop_event, thread)
+            print("no reservoir predictions above the confidence threshold, "
+                  "skipping the confidence distribution plot")
+
         # Compute the average confidence
-        average_confidence = sum(res[1] for res in sorted_res) / len(sorted_res)
-
-        print(f"Average Confidence Level: {average_confidence:.2f}%")
+        if sorted_res:
+            average_confidence = (
+                sum(res[1] for res in sorted_res) / len(sorted_res))
+            print(f"Average Confidence Level: {average_confidence:.2f}%")
 
         # %%% create everything bagel map
         stop_event, thread = start_spinner(message="creating everything bagel plot")
