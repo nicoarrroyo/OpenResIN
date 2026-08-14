@@ -62,7 +62,7 @@ def pre_run_checks():
         i = ui_do.alert_user(
             warning="CLOUD_MASKING enabled but no CUDA support found",
             consequence="Cloud masking will be slow extremely slow",
-            fix=("Either accept low-power mode or use NVIDIA graphics card "
+            solution=("Either accept low-power mode or use NVIDIA graphics card "
             "with CUDA library installed"),
             n_errors=i)
     if c.CLOUD_MASKING and not ocm_available:
