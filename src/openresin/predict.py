@@ -155,24 +155,33 @@ def main(argv=None):
         land_predictions = []
         sea_predictions = []
         for i, prediction in enumerate(predictions):
-            prediction = predictions[i].split(",")
-            for j, cell in enumerate(prediction):
+            if i < 2:
+                continue # skip first couple rows for header
+            prediction = prediction.split(",")
+            # The chunk number lives in column 0, the same place the resume
+            # loop above reads it from. Using the line index instead put every
+            # chunk two positions out, because of the two header rows.
+            try:
+                chunk_id = int(prediction[0])
+            except ValueError:
+                continue # not a data row
+            for cell in prediction[1:]:
                 try:
                     confidence = float(cell.split(" ")[-1])
                 except:
                     confidence = 100
                 if "reservoir" in cell.strip().lower():
                     if confidence >= confidence_threshold:
-                        res_predictions.append([i, confidence])
+                        res_predictions.append([chunk_id, confidence])
                 if "water" in cell.strip().lower():
                     if confidence >= confidence_threshold:
-                        bod_predictions.append([i, confidence])
+                        bod_predictions.append([chunk_id, confidence])
                 if "land" in cell.strip().lower():
                     if confidence >= confidence_threshold:
-                        land_predictions.append([i, confidence])
+                        land_predictions.append([chunk_id, confidence])
                 if "sea" in cell.strip().lower():
                     if confidence >= confidence_threshold:
-                        sea_predictions.append([i, confidence])
+                        sea_predictions.append([chunk_id, confidence])
 
         res_estimate = int(len(res_predictions) * res_precision / res_recall)
         bod_estimate = int(len(bod_predictions) * bod_precision / bod_recall)
