@@ -11,10 +11,12 @@ def pre_run_checks():
     # ==== check if low-power mode is necessary ====
     try:
         import torch; import omnicloudmask; import cupy;
-        if torch.cuda.is_available():
-            ocm_available = True
-            cuda_available = True
-            cupy_available = True
+        # All three imported, so the libraries are present. Whether the GPU is
+        # actually usable is a separate question, and both answers have to
+        # leave every flag bound: the step checks below read all three.
+        ocm_available = True
+        cupy_available = True
+        cuda_available = torch.cuda.is_available()
         del torch; del omnicloudmask; del cupy;
         LP_MODE = False
     except:
