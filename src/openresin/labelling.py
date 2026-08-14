@@ -1,7 +1,7 @@
 # %% Standard Libraries
-import os
 import csv
 import datetime as dt
+import os
 import shutil
 import sys
 import time
@@ -14,9 +14,9 @@ from PIL import Image
 from . import data_handling as data_do
 from . import image_handling as image_do
 from . import misc
+from . import nalira_config as c
 from . import user_interfacing as ui_do
 
-from . import nalira_config as c
 
 # %% 1. Creating image arrays (iterative)
 def one_create_image_arrays(folders_path, folder, tci_60_array):
@@ -218,8 +218,8 @@ def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
     
     from omnicloudmask import predict_from_array
     if not c.HIGH_RES and not LP_MODE:
-        print(("WARNING: high-resolution setting is disabled. "
-        "cloud masking may not be accurate"))
+        print("WARNING: high-resolution setting is disabled. "
+        "cloud masking may not be accurate")
         ui_do.confirm_continue_or_exit()
     
     print(f"step 3 beginning at {dt.datetime.now().time():%H:%M:%S}")
@@ -377,7 +377,6 @@ def fiveb_plot(labelling_array, folder_path):
     image_do.plot_indices(labelling_array, c.PLOT_SIZE, c.SAVE_IMAGES, 
                           folder_path, c.RES)
     print(f"step 5b complete! finished at {dt.datetime.now().time():%H:%M:%S}")
-    return
 
 # %% 6. Data preparation
 def six_prepare_data(folders, prefix):
@@ -656,14 +655,14 @@ def seven_label_data(LP_MODE, i, labelling_array, tci_array, tci_60_array,
         # #### 7.3 User Labelling
         data_do.blank_entry_check(file=data_file_path)
         if data_correction:
-            print((
+            print(
                 "this chunk "
                 f"({invalid_rows_index+1}/{len(invalid_rows)})"
                 " should contain "
                 f"{int(lines[i+1].split(',')[1])} reservoirs and "
                 f"{int(lines[i+1].split(',')[2])} non-reservoir "
                 "water bodies"
-                ))
+                )
         n_reservoirs = input("how many reservoirs? ").strip().lower()
         n_bodies = ""
         entry_list = []
