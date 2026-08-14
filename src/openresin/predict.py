@@ -260,7 +260,9 @@ def main(argv=None):
             plot_name_base = "the_map"
             counter = 0
             plot_name = f"{plot_name_base}.jpg"
-            while os.path.exists(plot_name):
+            # Test the path we actually write to, not a bare name against the
+            # working directory, or the guard can never fire.
+            while os.path.exists(os.path.join(folder_path, plot_name)):
                 counter += 1
                 plot_name = f"{plot_name_base}_{counter}.jpg"
             plot_save_location = os.path.join(folder_path, plot_name)
@@ -350,7 +352,7 @@ def main(argv=None):
             plot_name_base = "the_everything_bagel"
             counter = 0
             plot_name = f"{plot_name_base}.jpg"
-            while os.path.exists(plot_name):
+            while os.path.exists(os.path.join(folder_path, plot_name)):
                 counter += 1
                 plot_name = f"{plot_name_base}_{counter}.jpg"
             plot_save_location = os.path.join(folder_path, plot_name)
