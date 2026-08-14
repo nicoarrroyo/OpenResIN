@@ -51,7 +51,7 @@ def gpu_nanpercentile(stack, q_list):
         cp.get_default_memory_pool().free_all_blocks()
         return np.array(results)  # shape: (len(q_list), h, w)
 
-    except cp.cuda.memory.OutOfMemoryError:
+    except cp.cuda.memory.OutOfMemoryError: # BUG! CP NOT REACHABLE
         print("WARNING: insufficient VRAM, falling back to CPU")
         return np.nanpercentile(stack, q_list, axis=0)
 
