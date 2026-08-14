@@ -64,6 +64,8 @@ def get_confusion_matrix(model_epochs, confidence_threshold,
                          folder=DEFAULT_FOLDER):
     folder_path = os.path.join(c.DATA_DIR, "sat-images", folder)
 
+    tile_number_field = folder.split("_")[5] # Tile number is field 5 of .SAFE
+
     # responses file
     responses_path = os.path.join(folder_path, "responses_5000_chunks.csv")
     with open(responses_path, mode="r") as file:
@@ -102,12 +104,12 @@ def get_confusion_matrix(model_epochs, confidence_threshold,
 
         water_n = int(split_response[2])
         water_coords = extract_coords(split_response[8], create_box_flag=False)
+        bod_n = water_n
         if water_n == 1 and water_coords[0] == 0 and water_coords[-1] == 157:
             sea_n = 25
         else:
             sea_n = 0
-            bod_n = water_n
-        
+
         # each of the 25 minichunks that isn't res or bod must be land
         land_n = 25 - res_n - bod_n
 
