@@ -1,10 +1,10 @@
 """ Navigable Automated Labelling Interface for Regions of Attention (NALIRA)
 
 Description:
-NALIRA processes Sentinel 2 imagery to generate labelled data for the 
-Keras Reservoir Identification Sequential Platform (KRISP) as part of the 
-overarching Individual Project Data to Model Pipeline (IPDMP). It extracts 
-water body information from satellite imagery and provides a UI for data 
+NALIRA processes Sentinel 2 imagery to generate labelled data for the
+Keras Reservoir Identification Sequential Platform (KRISP) as part of the
+overarching Individual Project Data to Model Pipeline (IPDMP). It extracts
+water body information from satellite imagery and provides a UI for data
 labelling. The purpose of NALIRA is to create training and test data for KRISP.
 
 Workflow:
@@ -16,9 +16,9 @@ Workflow:
     - Rivers and streams: Uses dedicated river shapefile with 100m buffer
     - Large reservoirs: Uses Northing and Easting information in CSV file
     - Urban areas: Uses .tif rasterized for masking
-    - Areas with large slopes: 
+    - Areas with large slopes:
 
-3. Cloud Masking: 
+3. Cloud Masking:
     - OmniCloudMask, using red and green Sentinel 2 bands
 
 4. Index Calculation:
@@ -28,24 +28,24 @@ Workflow:
         - Enhanced Vegetation Index (EVI)
 
 5. Compositing:
-    - A set of Spectral-Temporal Metrics (STMs) computed for all pixels. 
-        - These metrics are based on the temporal median, and 25th and 75th 
-        percentiles of NDWI, NDVI, and/or EVI. 
-        - The NDVI and/or EVI can be used to differentiate vegetation water 
-        content from surface water bodies. 
-    - Optional data visualization at this stage. 
+    - A set of Spectral-Temporal Metrics (STMs) computed for all pixels.
+        - These metrics are based on the temporal median, and 25th and 75th
+        percentiles of NDWI, NDVI, and/or EVI.
+        - The NDVI and/or EVI can be used to differentiate vegetation water
+        content from surface water bodies.
+    - Optional data visualization at this stage.
 
 7. Training Data Polygons:
-    - Preliminary data preparation steps, including ensuring file content 
-    validity and presence, as well as locating and opening the necessary True 
-    Colour Image (TCI) for data labelling. 
-    - Provides a Tkinter GUI for manual region of interest (ROI)  labelling via 
+    - Preliminary data preparation steps, including ensuring file content
+    validity and presence, as well as locating and opening the necessary True
+    Colour Image (TCI) for data labelling.
+    - Provides a Tkinter GUI for manual region of interest (ROI)  labelling via
     rectangle selection.
-    - Uses chunk-based processing; saves the quantity of water reservoirs and 
-    water bodies, labelled ROI coordinates, and chunk numbers to a CSV file. 
+    - Uses chunk-based processing; saves the quantity of water reservoirs and
+    water bodies, labelled ROI coordinates, and chunk numbers to a CSV file.
 
 Outputs:
-    - Labelled data in CSV format, with chunk IDs, counts of water bodies, and 
+    - Labelled data in CSV format, with chunk IDs, counts of water bodies, and
     their coordinates.
     - Python list containing each calculated water index.
 """
@@ -148,24 +148,24 @@ def main(argv=None):
     if LP_MODE:
         ui_do.alert_user(
             warning=("Pre-run checks found that your machine lacks the supported "
-                     "hardware to accelerate the regular NALIRA workflow."), 
+                     "hardware to accelerate the regular NALIRA workflow."),
             consequence=("The program wants to switch to the low-power mode "
                          "(LP_mode) branch, where expensive operations like cloud "
                          "masking and percentile calculations will be carried out "
                          "on a chunk-by-chunk basis. Data segmentation in LP_MODE "
-                         "is not supported yet, but your responses will be saved."), 
+                         "is not supported yet, but your responses will be saved."),
             solution="Accept the switch to LP_MODE.")
         image_arrays_list = []
     ui_do.confirm_continue_or_exit()
 
     ui_do.table_print(
-        n_chunks=c.N_CHUNKS, n_images=c.N_IMAGES, high_res=c.HIGH_RES, 
-        known_feature_masking=c.KNOWN_FEATURE_MASKING, 
-        cloud_masking=c.CLOUD_MASKING, 
-        compositing=c.COMPOSITING, 
-        show_plots=c.SHOW_INDEX_PLOTS, 
-        save_images=c.SAVE_IMAGES, 
-        labelling=c.LABEL_DATA, 
+        n_chunks=c.N_CHUNKS, n_images=c.N_IMAGES, high_res=c.HIGH_RES,
+        known_feature_masking=c.KNOWN_FEATURE_MASKING,
+        cloud_masking=c.CLOUD_MASKING,
+        compositing=c.COMPOSITING,
+        show_plots=c.SHOW_INDEX_PLOTS,
+        save_images=c.SAVE_IMAGES,
+        labelling=c.LABEL_DATA,
         low_power=LP_MODE)
 
         # %% 1. Create Image Arrays
@@ -178,32 +178,32 @@ def main(argv=None):
         print("----------")
         print("| STEP 1 |")
         print("----------")
-        [image_arrays, 
-         image_metadata, 
-         prefix, 
-         tci_array, 
+        [image_arrays,
+         image_metadata,
+         prefix,
+         tci_array,
          tci_60_array
          ] = operation.one_create_image_arrays(
-             folders_path, 
-             folder, 
+             folders_path,
+             folder,
              tci_60_array # for checking if a tci has been opened yet
              )
         if LP_MODE:
             image_arrays_list.append(image_arrays)
-    
+
         # %% 2. Mask Known Features
         print("----------")
         print("| STEP 2 |")
         print("----------")
         if c.KNOWN_FEATURE_MASKING:
             image_arrays = operation.two_mask_known_feature(
-                image_arrays, 
+                image_arrays,
                 image_metadata)
             if LP_MODE: # overwrite previous image arrays if features get masked
                 image_arrays_list[folder_num] = image_arrays
         elif not c.KNOWN_FEATURE_MASKING:
             print("skipping known feature masking")
-    
+
         # %% 3. Mask Clouds (Omnicloudmask)
         print("----------")
         print("| STEP 3 |")
@@ -215,7 +215,7 @@ def main(argv=None):
                 print("skipping cloud masking")
         elif LP_MODE:
             print("skipping cloud masking (done during labelling)")
-    
+
         # %% 4. Calculate Spectral Indices
         print("----------")
         print("| STEP 4 |")
@@ -251,15 +251,15 @@ def main(argv=None):
     print("| STEP 6 |")
     print("----------")
     if c.LABEL_DATA:
-        [break_flag, 
-         i, 
-         data_file_path, 
-         data_correction, 
-         invalid_rows, 
+        [break_flag,
+         i,
+         data_file_path,
+         data_correction,
+         invalid_rows,
          lines,
          last_chunk
          ] = operation.six_prepare_data(
-             folders, 
+             folders,
              prefix
              )
     else:
@@ -272,14 +272,14 @@ def main(argv=None):
     if c.LABEL_DATA:
         index_chunks = operation.seven_label_data(
             LP_MODE,
-            i, 
-            labelling_array, 
-            tci_array, 
-            tci_60_array, 
-            data_file_path, 
-            data_correction, 
-            invalid_rows, 
-            lines, 
+            i,
+            labelling_array,
+            tci_array,
+            tci_60_array,
+            data_file_path,
+            data_correction,
+            invalid_rows,
+            lines,
             last_chunk
             )
     else:

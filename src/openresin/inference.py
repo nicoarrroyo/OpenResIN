@@ -11,6 +11,8 @@ import os
 import re  # "regular expressions" for parsing filenames
 import sys
 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2" # filter TF outputs
+
 import numpy as np
 import rasterio
 import tensorflow as tf
