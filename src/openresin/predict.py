@@ -54,8 +54,10 @@ def build_parser():
     # it back. Hardcoding 150 here is how they came to disagree.
     parser.add_argument(
         "--model-epochs", type=int, default=c.EPOCHS,
-        help="epoch count in the model filename "
-             "(151 selects the tci model; default: %(default)s)")
+        help="epoch count in the model filename (default: %(default)s)")
+    parser.add_argument(
+        "--model-type", default=c.MODEL_TYPE, choices=("ndwi", "tci"),
+        help="model type in the model filename (default: %(default)s)")
     parser.add_argument(
         "--n-chunk-preds", type=int, default=5000,
         help="chunks to predict this run; clamped to what is left "
@@ -110,10 +112,8 @@ def main(argv=None):
      product_discriminator_and_format) = folder.split("_")
 
     real_n_chunks = math.floor(math.sqrt(n_chunks)) ** 2 - 1
-    if model_epochs == 151:
-        model_name=f"tci model epochs-{model_epochs}.keras"
-    else:
-        model_name=f"ndwi model epochs-{model_epochs}.keras"
+    # Same filename train.py writes: "{MODEL_TYPE} model epochs-{EPOCHS}.keras".
+    model_name = f"{args.model_type} model epochs-{model_epochs}.keras"
 
     # file format: P_(chunks)_(minichunks)_(epochs)_(tile number)
     # P for predictions
