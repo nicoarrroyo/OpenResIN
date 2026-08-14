@@ -289,15 +289,17 @@ def main(argv=None):
     print("----------")
     print("| STEP 8 |")
     print("----------")
-    if not LP_MODE:
+    if LP_MODE:
+        print("skipping data segmentation (not supported in LP MODE)")
+    elif not c.LABEL_DATA:
+        print("skipping data segmentation (labelling was skipped)")
+    else:
         operation.eight_segment_data(
             data_file_path,
             index_chunks,
             c.PATCHES_DIR,
             prefix
             )
-    elif LP_MODE:
-        print("skipping data segmentation (not supported in LP MODE)")
 
     return 0
 
