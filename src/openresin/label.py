@@ -52,13 +52,13 @@ Outputs:
 # %% Start
 import argparse
 import os
+
 import numpy as np
+
 from . import labelling as operation
-from . import user_interfacing as ui_do
-from .misc import pre_run_checks#, lp_check
-
 from . import nalira_config as c
-
+from . import user_interfacing as ui_do
+from .misc import pre_run_checks  #, lp_check
 
 
 def build_parser():

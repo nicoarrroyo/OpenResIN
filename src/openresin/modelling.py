@@ -1,7 +1,9 @@
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras import layers, Sequential
+from tensorflow.keras import Sequential, layers
+
 from . import krisp_config as c
+
 
 # %% 3. Load and prepare dataset
 def three_load_dataset(training_data_path):
@@ -13,7 +15,7 @@ def three_load_dataset(training_data_path):
         'label_text':tf.io.FixedLenFeature([], tf.string),
         'image_raw': tf.io.FixedLenFeature([], tf.string),
     }
-    
+
     def parse_img(example_proto):
         features = tf.io.parse_single_example(example_proto, img_features)
         img = tf.io.decode_png(features["image_raw"], channels=3)
@@ -24,26 +26,26 @@ def three_load_dataset(training_data_path):
         ])
         img = tf.image.resize(img, [c.IMG_HEIGHT, c.IMG_WIDTH])
         return img, features["label"]
-    
+
     raw = tf.data.TFRecordDataset(training_data_path)
     dataset_size = sum(1 for _ in raw)
-    
-    shuffled = raw.shuffle(dataset_size, seed=c.RANDOM_SEED, 
+
+    shuffled = raw.shuffle(dataset_size, seed=c.RANDOM_SEED,
                            reshuffle_each_iteration=True)
     val_size  = int(dataset_size * c.VALIDATION_SPLIT)
-    
+
     val_ds   = (shuffled.take(val_size)
                         .map(parse_img, num_parallel_calls=tf.data.AUTOTUNE)
                         .batch(c.BATCH_SIZE)
                         .cache()
                         .prefetch(tf.data.AUTOTUNE))
-    
+
     train_ds = (shuffled.skip(val_size)
                         .map(parse_img, num_parallel_calls=tf.data.AUTOTUNE)
                         .batch(c.BATCH_SIZE)
                         .cache()
                         .prefetch(tf.data.AUTOTUNE))
-    
+
     print(f"dataset loaded: {dataset_size} records, "
           f"val={val_size}, train={dataset_size - val_size}")
     return train_ds, val_ds, dataset_size
@@ -52,7 +54,7 @@ def three_load_dataset(training_data_path):
 # %% 4. Build model
 def four_build_model(num_classes):
     data_augmentation = Sequential([
-        layers.RandomFlip("horizontal", 
+        layers.RandomFlip("horizontal",
                           input_shape=(c.IMG_HEIGHT, c.IMG_WIDTH, 3)),
         layers.RandomRotation(0.1),
         layers.RandomZoom(0.1),
@@ -99,15 +101,16 @@ def five_train(model, train_ds, val_ds):
 
 # %% 6. Save model
 def six_save_model(model, history, save_dir):
-    import os, datetime
+    import datetime
+    import os
     if not c.SAVE_MODEL or not history:
         print("model saving skipped")
         return
-    
+
     os.makedirs(save_dir, exist_ok=True)
     base_path = os.path.join(
         save_dir, f"{c.MODEL_TYPE} model epochs-{c.EPOCHS}.keras")
-    
+
     if os.path.exists(base_path):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         base, ext = os.path.splitext(base_path)
@@ -115,7 +118,7 @@ def six_save_model(model, history, save_dir):
         print("file exists, saving versioned copy")
     else:
         save_path = base_path
-    
+
     try:
         model.save(save_path)
         print(f"model saved to: {save_path}")

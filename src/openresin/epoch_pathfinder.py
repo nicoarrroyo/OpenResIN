@@ -1,9 +1,11 @@
-from .modelling import three_load_dataset, four_build_model
-from . import krisp_config as c
-import numpy as np
-import matplotlib.pyplot as plt
-from . import user_interfacing as ui_do
 import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+from . import krisp_config as c
+from . import user_interfacing as ui_do
+from .modelling import four_build_model, three_load_dataset
 
 EPOCH_SETTINGS = list(range(50, 175, 25))
 NUM_REPEATS    = 2

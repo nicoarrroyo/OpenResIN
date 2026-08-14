@@ -4,24 +4,28 @@ Keras Reservoir Identification Sequential Platform - Yielding of data
 """
 # %%% i. Import External Libraries
 import argparse
-import time
-import os
 import datetime
-import zoneinfo as zf
 import math
+import os
+import time
+import zoneinfo as zf
+from collections import Counter
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import cm
-from collections import Counter
 
 # %%% ii. Import Internal Functions
 from . import krisp_config as c
-from .inference import run_model
-from .data_handling import check_file_permission, blank_entry_check
-from .data_handling import deduplicate_by_max_confidence
+from .data_handling import (
+    blank_entry_check,
+    check_file_permission,
+    deduplicate_by_max_confidence,
+)
 from .image_handling import image_to_array
+from .inference import run_model
 from .misc import convert_seconds_to_hms
-from .user_interfacing import start_spinner, end_spinner, confirm_continue_or_exit
+from .user_interfacing import confirm_continue_or_exit, end_spinner, start_spinner
 
 # Tiles I have worked through, kept as a record of what is downloaded and how
 # far each one got. "##" = downloaded, "###" = fully predicted.
@@ -101,8 +105,8 @@ def main(argv=None):
     stop_event, thread = start_spinner(message="pre-run preparation")
     folder_path = os.path.join(HOME, "data", "sat-images", folder)
 
-    (sentinel_name, instrument_and_product_level, datatake_start_sensing_time, 
-     processing_baseline_number, relative_orbit_number, tile_number_field, 
+    (sentinel_name, instrument_and_product_level, datatake_start_sensing_time,
+     processing_baseline_number, relative_orbit_number, tile_number_field,
      product_discriminator_and_format) = folder.split("_")
 
     real_n_chunks = math.floor(math.sqrt(n_chunks)) ** 2 - 1
@@ -136,8 +140,7 @@ def main(argv=None):
         except:
             continue
 
-    if n_chunk_preds > real_n_chunks - biggest_chunk:
-        n_chunk_preds = real_n_chunks - biggest_chunk
+    n_chunk_preds = min(n_chunk_preds, real_n_chunks - biggest_chunk)
 
     if n_chunk_preds == 0:
         end_spinner(stop_event, thread)
@@ -145,7 +148,7 @@ def main(argv=None):
         # %% data processing
         with open (predictions_file_path, mode="r") as file:
             predictions = file.readlines()
-    
+
         # %%% collecting and printing prediction results
         res_predictions = []
         bod_predictions = []
@@ -170,12 +173,12 @@ def main(argv=None):
                 if "sea" in cell.strip().lower():
                     if confidence >= confidence_threshold:
                         sea_predictions.append([i, confidence])
-    
+
         res_estimate = int(len(res_predictions) * res_precision / res_recall)
         bod_estimate = int(len(bod_predictions) * bod_precision / bod_recall)
         land_estimate = int(len(land_predictions) * land_precision / land_recall)
         sea_estimate = int(len(sea_predictions) * sea_precision / sea_recall)
-    
+
         print("congratulations!")
         print("krisp, with help from nalira and krispette, and everyone else, "
               "have found...")
@@ -183,7 +186,7 @@ def main(argv=None):
         print(f"{bod_estimate} non-reservoir water bodies in east england!")
         print(f"{land_estimate} land minichunks in east england!")
         print(f"{sea_estimate} sea minichunks in east england!")
-    
+
         stop_event, thread = start_spinner(message="creating map")
         sorted_res = sorted(res_predictions, reverse=True, key=lambda row: row[1])
         sorted_res = sorted_res[:res_estimate]
@@ -193,59 +196,59 @@ def main(argv=None):
         sorted_land = sorted_land[:land_estimate]
         sorted_sea = sorted(sea_predictions, reverse=True, key=lambda row: row[1])
         sorted_sea = sorted_sea[:sea_estimate]
-    
+
         # deduplication
         deduplicated_sorted_res = deduplicate_by_max_confidence(sorted_res)
         deduplicated_sorted_bod = deduplicate_by_max_confidence(sorted_bod)
         deduplicated_sorted_land = deduplicate_by_max_confidence(sorted_land)
         deduplicated_sorted_sea = deduplicate_by_max_confidence(sorted_sea)
-    
+
         # %%% creating the reservoir map
         granule_path = os.path.join(folder_path, "GRANULE")
-        subdirs = [d for d in os.listdir(granule_path) 
+        subdirs = [d for d in os.listdir(granule_path)
                    if os.path.isdir(os.path.join(granule_path, d))]
         prefix = (f"{tile_number_field}_{datatake_start_sensing_time}")
-    
-    
-        map_image = image_to_array(os.path.join(granule_path, 
-                                                subdirs[0], "IMG_DATA", 
-                                                f"R{res}m", 
+
+
+        map_image = image_to_array(os.path.join(granule_path,
+                                                subdirs[0], "IMG_DATA",
+                                                f"R{res}m",
                                                 f"{prefix}_TCI_{res}m.jp2"))
         plt.figure(figsize=(6, 6))
         plt.imshow(map_image)
         ax = plt.gca()
-    
+
         ax.spines["left"].set_visible(False)
         ax.spines["bottom"].set_visible(False)
-        ax.tick_params(left=False, bottom=False, 
+        ax.tick_params(left=False, bottom=False,
                        labelleft=False, labelbottom=False)
-    
+
         cmap = cm.get_cmap("coolwarm")
         all_confidences = [r[1] for r in sorted_res]
         norm = plt.Normalize(min(all_confidences), max(all_confidences))
-    
+
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         # blue is lowest confidence, red is highest confidence
-    
+
         # calculate chunk geometry
         chunks_per_side = int(np.sqrt(n_chunks))
         side_length = map_image.shape[0]
         chunk_length = side_length / chunks_per_side
-    
+
         # %%%% plotting reservoir map
-        for res_item in deduplicated_sorted_res:      
+        for res_item in deduplicated_sorted_res:
             chunk = int(res_item[0])
             chunk_col = chunk % chunks_per_side
             chunk_ulx = chunk_col * chunk_length
-        
+
             chunk_row = chunk // chunks_per_side
             chunk_uly = chunk_row * chunk_length
-        
+
             marker_color = cmap(norm(res_item[1]))
             ax.plot(chunk_ulx, chunk_uly, marker="o", color=marker_color, ms=2)
         end_spinner(stop_event, thread)
-    
+
         # %%%% saving reservoir map
         if save_map:
             stop_event, thread = start_spinner(message="saving map")
@@ -259,24 +262,24 @@ def main(argv=None):
             plt.savefig(plot_save_location, dpi=3000, bbox_inches="tight")
             end_spinner(stop_event, thread)
             print(f"map saved as {plot_name}")
-    
+
         plt.show()
-    
+
         # %%% creating confidence distribution plot
         stop_event, thread = start_spinner(message="plotting confidence "
                                            "distribution")
         # Extract confidence values and round them to the nearest integer
         confidences = [(round(res[1] / 2)) * 2 for res in deduplicated_sorted_res]
-    
+
         # Count occurrences of each confidence level
         confidence_counts = Counter(confidences)
-    
+
         # Sort by confidence level
         sorted_confidences = sorted(confidence_counts.items())
-    
+
         # Extract data for plotting
         x_vals, y_vals = zip(*sorted_confidences)
-    
+
         # Plot the histogram
         plt.figure(figsize=(5, 3))
         plt.bar(x_vals, y_vals, color='royalblue', edgecolor='black')
@@ -284,35 +287,35 @@ def main(argv=None):
         plt.ylabel("Number of Reservoirs")
         plt.title("Distribution of Confidence Levels for Predicted Reservoirs")
         plt.xticks(range(min(x_vals), max(x_vals) + 5, 5))
-    
+
         plt.grid(axis='y', linestyle='--', alpha=0.7)
         end_spinner(stop_event, thread)
         plt.show()
         # Compute the average confidence
         average_confidence = sum(res[1] for res in sorted_res) / len(sorted_res)
-    
+
         print(f"Average Confidence Level: {average_confidence:.2f}%")
-    
+
         # %%% create everything bagel map
         stop_event, thread = start_spinner(message="creating everything bagel plot")
         deduplicated_sorted_classes = [
-            deduplicated_sorted_res, 
-            deduplicated_sorted_bod, 
-            deduplicated_sorted_land, 
+            deduplicated_sorted_res,
+            deduplicated_sorted_bod,
+            deduplicated_sorted_land,
             deduplicated_sorted_sea
             ]
         colours = ["b", "g", "y", "c"]
-    
+
         plt.figure(figsize=(6, 6))
         plt.imshow(map_image)
         ax = plt.gca()
-    
+
         ax.spines["left"].set_visible(False)
         ax.spines["bottom"].set_visible(False)
-        ax.tick_params(left=False, bottom=False, 
+        ax.tick_params(left=False, bottom=False,
                        labelleft=False, labelbottom=False)
         end_spinner(stop_event, thread)
-    
+
         # %%%% plotting everything bagel map
         for i, deduplicated_sorted_class in enumerate(deduplicated_sorted_classes):
             stop_event, thread = start_spinner(message=f"plotting class {i+1}")
@@ -320,14 +323,14 @@ def main(argv=None):
                 chunk = int(element[0])
                 chunk_col = chunk % chunks_per_side
                 chunk_ulx = chunk_col * chunk_length
-            
+
                 chunk_row = chunk // chunks_per_side
                 chunk_uly = chunk_row * chunk_length
-            
+
                 marker_color = colours[i]
                 ax.plot(chunk_ulx, chunk_uly, marker="o", color=marker_color, ms=1)
             end_spinner(stop_event, thread)
-    
+
         # %%%% saving everything bagel map
         if save_map:
             stop_event, thread = start_spinner(message="saving 'everything bagel' map")
@@ -353,8 +356,8 @@ def main(argv=None):
     duration = (0.00045 * n_files) + 6.62
     h, m, s = convert_seconds_to_hms(1.1 * duration)
     est_duration = datetime.timedelta(
-        hours=h, 
-        minutes=m, 
+        hours=h,
+        minutes=m,
         seconds=s)
 
     time_format = "%H:%M:%S %B %d %Y"
@@ -394,11 +397,11 @@ def main(argv=None):
     run_start_time = time.monotonic()
     print("\n=== KRISP RUN START ===")
     the_results = run_model(
-        folder=folder, 
-        n_chunks=5000, 
-        model_name=model_name, 
-        max_multiplier=0.41, 
-        start_chunk=biggest_chunk, 
+        folder=folder,
+        n_chunks=5000,
+        model_name=model_name,
+        max_multiplier=0.41,
+        start_chunk=biggest_chunk,
         n_chunk_preds=int(n_chunk_preds)
         )
     print("=== KRISP RUN COMPLETE ===\n")
@@ -416,9 +419,9 @@ def main(argv=None):
     with open(predictions_file_path, mode="a") as ap:
         for result in the_results:
             chunk_num, minichunk_num, label, confidence = result
-            base_entry = f"{label} {str(confidence)},"
+            base_entry = f"{label} {confidence!s}," # apparently, !s is the same as str()
             if minichunk_num == 0:
-                ap.write(f"\n{str(chunk_num)},{base_entry}")
+                ap.write(f"\n{chunk_num!s},{base_entry}")
             else:
                 ap.write(f"{base_entry}")
 

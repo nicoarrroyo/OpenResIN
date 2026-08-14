@@ -1,8 +1,10 @@
 import csv
+import hashlib
 import os
 import re
-import hashlib
+
 import numpy as np
+
 
 def get_sen2_bands(high_res):
     RED_BAND = "04"
@@ -437,6 +439,7 @@ def deduplicate_by_max_confidence(class_prediction_list):
                   key=lambda item: item[0])
 
 import tensorflow as tf
+
 """
 Standard functons that can be used to convert training data into a format 
 that can be serialised by TensorFlow. This can make data read/write speeds 

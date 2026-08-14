@@ -3,8 +3,10 @@
 
 import argparse
 import os
-import numpy as np
+
 import matplotlib.pyplot as plt
+import numpy as np
+
 from . import krisp_config as c
 from .data_handling import extract_coords
 

@@ -4,13 +4,12 @@ Keras Reservoir Identification Sequential Platform - Trainer
 import argparse
 import os
 import time
+
 import matplotlib.pyplot as plt
 
 from . import krisp_config as c
 from . import modelling as operation
-from .user_interfacing import (start_spinner, end_spinner, list_folders,
-                               table_print)
-
+from .user_interfacing import end_spinner, list_folders, start_spinner, table_print
 
 
 def build_parser():
