@@ -1,0 +1,63 @@
+import os
+
+# --- Processing Settings ---
+N_CHUNKS                = 5000      # number of chunks into which images are split
+
+HIGH_RES                = True      # use finer 10m spatial resolution (slower)
+
+RES = "10m" if HIGH_RES else "60m"
+
+KNOWN_FEATURE_MASKING   = True
+
+CLOUD_MASKING           = True
+
+COMPOSITING             = True
+
+SHOW_INDEX_PLOTS        = False
+
+SAVE_IMAGES             = False
+
+LABEL_DATA              = True
+
+DATA_FILE_NAME_SUFFIX   = str(N_CHUNKS) + "chunks.csv"
+
+TITLE_SIZE              = 5         # title size of plots
+
+PLOT_SIZE               = (3, 3)    # larger plots increase detail and pixel count
+
+PLOT_SIZE_CHUNKS        = (4, 4)
+
+N_IMAGES                = 1         # number of the found images to use (-1 for all)
+# --- Processing Settings ---
+
+# --- Paths ---
+# Anchored on this file's location, never on the working directory, so the
+# stages resolve the same paths no matter where they are launched from.
+PKG_DIR = os.path.dirname(os.path.abspath(__file__))    # src/openresin
+
+HOME_DIR = os.path.dirname(os.path.dirname(PKG_DIR))    # repo root
+
+DATA_DIR = os.path.join(HOME_DIR, "data")
+
+SEED_LABELS_DIR = os.path.join(DATA_DIR, "seed-labels")
+
+OUTPUTS_DIR = os.path.join(HOME_DIR, "outputs")
+
+LABELS_DIR = os.path.join(OUTPUTS_DIR, "labels")
+
+PATCHES_DIR = os.path.join(OUTPUTS_DIR, "patches")
+# --- Paths ---
+
+# --- Constants ---
+BAND_MAP_H = { # high-res version of band names
+    "green": "B03",
+    "red": "B04",
+    "nir": "B08"
+}
+
+BAND_MAP_L = { # low-res version of band names
+    "green": "B03",
+    "red": "B04",
+    "nir": "B8A"
+}
+# --- Constants ---

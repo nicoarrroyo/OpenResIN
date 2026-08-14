@@ -1,0 +1,12 @@
+# rules for how git handles the content moving from working tree to index
+
+# convert all files to lf (automatically) as they move to the index
+* text=auto
+
+# convert all files to lf in the working tree as well
+*.py    text eol=lf
+*.md    text eol=lf
+*.toml  text eol=lf
+
+# the hand-labelled seed data shouldn't be edited anyway, so that's exempt
+data/seed-labels/*.csv  -text

@@ -94,6 +94,10 @@ dmypy.json
 .kdev4/
 *.kdev4
 
+# Generated files / directories
+.claude
+.mcp.json
+
 # User-supplied inputs
 #   Contents are ignored, documentation is kept. data/seed-labels/ has no rule
 #   here on purpose: the hand-labelled seed CSVs are fixtures and are meant to
