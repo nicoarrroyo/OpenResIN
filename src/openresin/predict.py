@@ -223,7 +223,7 @@ def main(argv=None):
         ax.tick_params(left=False, bottom=False,
                        labelleft=False, labelbottom=False)
 
-        cmap = cm.get_cmap("coolwarm")
+        cmap = plt.get_cmap("coolwarm")
         all_confidences = [r[1] for r in sorted_res]
         norm = plt.Normalize(min(all_confidences), max(all_confidences))
 
