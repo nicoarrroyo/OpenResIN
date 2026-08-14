@@ -7,9 +7,9 @@ HIGH_RES                = True      # use finer 10m spatial resolution (slower)
 
 RES = "10m" if HIGH_RES else "60m"
 
-KNOWN_FEATURE_MASKING   = False
+KNOWN_FEATURE_MASKING   = True
 
-CLOUD_MASKING           = False
+CLOUD_MASKING           = True
 
 COMPOSITING             = True
 
