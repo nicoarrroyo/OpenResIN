@@ -1,3 +1,7 @@
+import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2" # filter TF outputs
+
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import Sequential, layers
@@ -102,7 +106,6 @@ def five_train(model, train_ds, val_ds):
 # %% 6. Save model
 def six_save_model(model, history, save_dir):
     import datetime
-    import os
     if not c.SAVE_MODEL or not history:
         print("model saving skipped")
         return

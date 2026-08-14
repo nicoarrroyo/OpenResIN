@@ -1,6 +1,9 @@
 import csv
 import hashlib
 import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2" # filter TF outputs
+
 import re
 
 import numpy as np
@@ -20,16 +23,16 @@ def gpu_nanpercentile(stack, q_list):
         import cupy as cp
         stack_gpu = cp.asarray(stack)
         nan_mask = cp.isnan(stack_gpu)
-        
+
         # sort with nans pushed to end
         stack_filled = cp.where(nan_mask, cp.inf, stack_gpu)
         sorted_stack = cp.sort(stack_filled, axis=0)  # (n, h, w)
         n_valid = cp.sum(~nan_mask, axis=0)  # (h, w)
-        
+
         h, w = stack.shape[1], stack.shape[2]
         row_idx = cp.arange(h)[:, None]
         col_idx = cp.arange(w)[None, :]
-        
+
         results = []
         for q in q_list:
             # linear interpolation index into sorted valid values
@@ -37,17 +40,17 @@ def gpu_nanpercentile(stack, q_list):
             lo = cp.floor(float_idx).astype(cp.int32)
             hi = cp.minimum(lo + 1, n_valid - 1)
             frac = float_idx - lo
-            
+
             lo_vals = sorted_stack[lo, row_idx, col_idx]
             hi_vals = sorted_stack[hi, row_idx, col_idx]
             interpolated = lo_vals * (1 - frac) + hi_vals * frac
             interpolated[n_valid == 0] = cp.nan
             results.append(cp.asnumpy(interpolated))
-        
+
         del stack_gpu, sorted_stack, nan_mask, stack_filled
         cp.get_default_memory_pool().free_all_blocks()
         return np.array(results)  # shape: (len(q_list), h, w)
-    
+
     except cp.cuda.memory.OutOfMemoryError:
         print("WARNING: insufficient VRAM, falling back to CPU")
         return np.nanpercentile(stack, q_list, axis=0)
@@ -55,18 +58,18 @@ def gpu_nanpercentile(stack, q_list):
 def rewrite(write_file, rows):
     """
     Used to remove any blank or blatantly invalid entries in a csv
-    
+
     Parameters
     ----------
     write_file : file
         A pre-opened file to which the program rewrites any values.
     rows : list
         A list containing every row in a csv file.
-    
+
     Returns
     -------
     None.
-    
+
     """
     for j in range(len(rows)):
         entry = f"{rows[j][0]},{rows[j][1]}"
@@ -76,19 +79,19 @@ def rewrite(write_file, rows):
 
 def blank_entry_check(file):
     """
-    Check a formatted csv file for blank entries when the expected format is 
+    Check a formatted csv file for blank entries when the expected format is
     one entry after the other. Blank entries are removed.
-    
+
     Parameters
     ----------
     file : string
-        The file name of the file which is having its rows checked for blank 
-        entries. This file is opened locally, then the rows are checked. 
-    
+        The file name of the file which is having its rows checked for blank
+        entries. This file is opened locally, then the rows are checked.
+
     Returns
     -------
     None.
-    
+
     """
     check_file_permission(file_name=file)
     cleaned_rows = []
@@ -100,7 +103,7 @@ def blank_entry_check(file):
                 cleaned_rows.append(row) # only keep valid rows
             else:
                 invalid_rows.append(i)
-    
+
     if not invalid_rows:
         pass
     else:
@@ -110,22 +113,22 @@ def blank_entry_check(file):
 
 def check_file_permission(file_name):
     """
-    A useful function to make sure a file is not being used / is open on the 
-    computer already before accessing it. If it is open, the user can simply 
-    close the file and press enter to retry. This function is necessary to 
-    call several times throughout the IPDGS program as it avoids crashing the 
-    program due to denied permission errors that occur as a result of trying 
-    to open a file that's already in use. 
-    
+    A useful function to make sure a file is not being used / is open on the
+    computer already before accessing it. If it is open, the user can simply
+    close the file and press enter to retry. This function is necessary to
+    call several times throughout the IPDGS program as it avoids crashing the
+    program due to denied permission errors that occur as a result of trying
+    to open a file that's already in use.
+
     Parameters
     ----------
     file_name : string
         The name of the file being checked.
-        
+
     Returns
     -------
     None.
-    
+
     """
     while True:
         try: # check if file is open
@@ -140,21 +143,21 @@ def create_box(coords):
     """
     Creates a square bounding box containing the input coordinates,
     adjusted to stay within the 0-157 boundary.
-    
+
     Args:
       coords: A list of four floats representing the input rectangle's
               coordinates in the format [ULX, ULY, LRX, LRY]
               (Upper Left X, Upper Left Y, Lower Right X, Lower Right Y).
-    
+
     Returns:
-      A list of four floats representing the coordinates of the  bounding box 
+      A list of four floats representing the coordinates of the  bounding box
       in the format [ULX, ULY, LRX, LRY].
     """
     # --- Constants ---
     MIN_COORD = 0.0
     MAX_COORD = 157.0
     BOX_SIZE = MAX_COORD / 5
-    
+
     # --- Input Validation ---
     if len(coords) != 4:
         raise ValueError("Input coords list must contain exactly four values.")
@@ -169,11 +172,11 @@ def create_box(coords):
               f"{MIN_COORD}-{MAX_COORD} range.")
         # Depending on requirements, you might raise an error here instead
         # Or clamp the input coordinates first
-    
+
     # --- 1. Calculate Center of the input rectangle ---
     center_x = (ulx + lrx) / 2.0
     center_y = (uly + lry) / 2.0
-    
+
     # --- 2. Create Initiall Box centered around the input rectangle ---
     # half the sixze of desired
     half_size = BOX_SIZE / 2.0
@@ -181,36 +184,36 @@ def create_box(coords):
     box_uly = center_y - half_size
     box_lrx = center_x + half_size
     box_lry = center_y + half_size
-    
+
     # --- 3. Adjust Box to stay within bounds [MIN_COORD, MAX_COORD] ---
     # aalso adjust right edge if it exceeds MAX_COORD
     if box_lrx > MAX_COORD:
       offset = box_lrx - MAX_COORD
       box_lrx = MAX_COORD
       box_ulx -= offset # Shift left edge by the same amount
-    
+
     # Adjust bottom edge if it exceeds MAX_COORD
     if box_lry > MAX_COORD:
       offset = box_lry - MAX_COORD
       box_lry = MAX_COORD
       box_uly -= offset # Shift top edge by the same amount
-    
+
     if box_ulx < MIN_COORD:
       offset = MIN_COORD - box_ulx
       box_ulx = MIN_COORD
       box_lrx += offset # Shift right edge by the same amount
-    
+
     if box_uly < MIN_COORD:
         offset = MIN_COORD - box_uly
         box_uly = MIN_COORD
         box_lry += offset # Shift bottom edge by the same amount
-    
+
     # --- Ensure the box is exactly a quarter of MAX_COORD after adjustments ---
     final_box_ulx = max(MIN_COORD, box_ulx)
     final_box_uly = max(MIN_COORD, box_uly)
     final_box_lrx = final_box_ulx + BOX_SIZE
     final_box_lry = final_box_uly + BOX_SIZE
-    
+
     # Final boundary check if enforcing size pushed it over the max boundary
     if final_box_lrx > MAX_COORD:
         final_box_lrx = MAX_COORD
@@ -218,20 +221,20 @@ def create_box(coords):
     if final_box_lry > MAX_COORD:
         final_box_lry = MAX_COORD
         final_box_uly = MAX_COORD - BOX_SIZE
-    
+
     # Return the final coordinates as floats
-    return [float(final_box_ulx), float(final_box_uly), 
+    return [float(final_box_ulx), float(final_box_uly),
             float(final_box_lrx), float(final_box_lry)]
 
 def extract_coords(coord_string, create_box_flag):
     """
-    Extracts coordinates from a string (including square brackets) and returns 
+    Extracts coordinates from a string (including square brackets) and returns
     them as a list of floats.
-    
+
     Args:
-      coord_string (str): A string containing coordinates within square 
+      coord_string (str): A string containing coordinates within square
       brackets, separated by spaces.
-      
+
     Returns:
       list: A list of floats representing the coordinates.
     """
@@ -239,7 +242,7 @@ def extract_coords(coord_string, create_box_flag):
         # Remove square brackets, split the string into numeric strings
         coord_string = coord_string.replace('[', '').replace(']', '')
         coord_strings = coord_string.split()
-        
+
         # Convert each numeric string to a float
         coordinates = [float(coord) for coord in coord_strings]
         if create_box_flag:
@@ -278,17 +281,17 @@ def extract_chunk_details(filename, pattern):
 def sort_prediction_results(data_list):
     """
     Sorts a list of lists based on the first two integer elements.
-    
+
     The sorting is done primarily by the first element (ascending)
     and secondarily by the second element (ascending). Assumes the input
     is a list where each element is a list starting with two numbers.
-    
+
     Args:
       data_list: A list of lists, e.g.,
                  [[0, 19, 'CLASS_A', 99.5],
                   [0, 2,  'CLASS_B', 88.0],
                   [1, 0,  'CLASS_A', 95.1], ...]
-    
+
     Returns:
       A NEW list containing the elements of data_list sorted according
       to the specified criteria. Returns an empty list if input is not a list
@@ -297,7 +300,7 @@ def sort_prediction_results(data_list):
     if not isinstance(data_list, list):
         print("Error: Input must be a list.")
         return [] # Return empty list or raise error
-    
+
     try:
         # Use the sorted() function to create and return a new sorted list.
         # The key is a lambda function that returns a tuple (item[0], item[1]).
@@ -306,7 +309,7 @@ def sort_prediction_results(data_list):
         sorted_list = sorted(data_list, key=lambda item: (item[0], item[1]))
         return sorted_list
     except (IndexError, TypeError) as e:
-        # Handle cases where inner items aren't lists or don't have 
+        # Handle cases where inner items aren't lists or don't have
         # enough elements
         print(f"Error during sorting: {e}")
         print("Please ensure input is a list of lists, each with at least two "
@@ -316,16 +319,16 @@ def sort_prediction_results(data_list):
 def extract_chunk_minichunk_key(filename):
     """
     Helper function to extract (chunk, minichunk) numbers from a filename.
-    Used as the key for sorting. Returns numbers or values that sort last 
+    Used as the key for sorting. Returns numbers or values that sort last
     on error.
     """
     # Get just the filename part without extension, in case a full path is passed
     base_name = os.path.splitext(os.path.basename(str(filename)))[0]
-    
+
     # Pattern to find "chunk [digits]" and "minichunk [digits]"
     pattern = re.compile(r"chunk\s+(\d+)\s+minichunk\s+(\d+)")
     match = pattern.search(base_name)
-    
+
     if match:
         try:
             # Extract numbers as integers
@@ -336,7 +339,7 @@ def extract_chunk_minichunk_key(filename):
         except (ValueError, IndexError):
             # Handle cases where captured groups aren't valid numbers or missing
             pass # Fall through to return the default 'sort last' key
-    
+
     # If pattern doesn't match or conversion fails, return a tuple
     # that will sort these items after all valid items.
     # float('inf') is larger than any integer.
@@ -345,15 +348,15 @@ def extract_chunk_minichunk_key(filename):
 def sort_file_names(filename_list):
     """
     Sorts a list of filenames based on embedded chunk and minichunk numbers.
-    
-    Assumes filenames generally follow the pattern 
+
+    Assumes filenames generally follow the pattern
     '... chunk [num] minichunk [num] ...'.
-    Sorts ascending primarily by chunk number, then secondarily by minichunk 
+    Sorts ascending primarily by chunk number, then secondarily by minichunk
     number. Filenames not matching the pattern are sorted towards the end.
-    
+
     Args:
       filename_list: A list of strings, where each string is a filename.
-    
+
     Returns:
       A NEW list containing the filenames sorted according to the criteria.
       Returns an empty list if the input is not a list or sorting fails globally.
@@ -361,7 +364,7 @@ def sort_file_names(filename_list):
     if not isinstance(filename_list, list):
         print("Error: Input must be a list of filenames.")
         return []
-    
+
     try:
         # Use sorted() with the helper function as the key
         # This applies extract_chunk_minichunk_key to each filename
@@ -390,16 +393,16 @@ def check_positive_int(var, description):
 
 def deduplicate_by_max_confidence(class_prediction_list):
     """
-    Filters a list of predictions to keep only the one with the highest 
+    Filters a list of predictions to keep only the one with the highest
     confidence for each unique chunk.
-    Each item in class_prediction_list is expected to be [chunk_index, 
+    Each item in class_prediction_list is expected to be [chunk_index,
     confidence, ...possibly_other_data...].
     """
     if not class_prediction_list:
         return []
 
     # Dictionary to store the best prediction for each chunk
-    # Key: chunk_index, Value: the entire prediction item [chunk_index, 
+    # Key: chunk_index, Value: the entire prediction item [chunk_index,
     # confidence, ...]
     best_predictions_for_chunk = {}
 
@@ -408,7 +411,7 @@ def deduplicate_by_max_confidence(class_prediction_list):
             print(f"Warning: Skipping invalid prediction item: "
                   f"{prediction_item}")
             continue
-        
+
         try:
             chunk_index = int(prediction_item[0])
             confidence = float(prediction_item[1])
@@ -417,7 +420,7 @@ def deduplicate_by_max_confidence(class_prediction_list):
                   f"{prediction_item}: {e}")
             continue
 
-        # If this chunk is already seen, check if the current prediction has 
+        # If this chunk is already seen, check if the current prediction has
         # higher confidence
         if chunk_index in best_predictions_for_chunk:
             if confidence > best_predictions_for_chunk[chunk_index][1]:
@@ -425,25 +428,25 @@ def deduplicate_by_max_confidence(class_prediction_list):
         else:
             # If this is the first time we see this chunk, store its prediction
             best_predictions_for_chunk[chunk_index] = prediction_item
-            
+
     # Convert the dictionary values back to a list
-    # Sort by original chunk index to maintain some order, though the primary 
+    # Sort by original chunk index to maintain some order, though the primary
     # purpose
     # of the input lists (sorted_res etc.) was sorting by confidence.
-    # If original order of chunks (not confidence) is important for the 
+    # If original order of chunks (not confidence) is important for the
     # de-duplicated list,
-    # you might need a different sorting strategy here or ensure input list is 
+    # you might need a different sorting strategy here or ensure input list is
     # pre-sorted by chunk.
     # For now, sorting by chunk index after de-duplication.
-    return sorted(list(best_predictions_for_chunk.values()), 
+    return sorted(list(best_predictions_for_chunk.values()),
                   key=lambda item: item[0])
 
 import tensorflow as tf
 
 """
-Standard functons that can be used to convert training data into a format 
-that can be serialised by TensorFlow. This can make data read/write speeds 
-dramatically faster and avoids creating tens of thousands of images. 
+Standard functons that can be used to convert training data into a format
+that can be serialised by TensorFlow. This can make data read/write speeds
+dramatically faster and avoids creating tens of thousands of images.
 """
 # https://www.tensorflow.org/tutorials/load_data/tfrecord
 def _bytes_feature(value):
@@ -490,4 +493,3 @@ def hash_tfrecord(path):
         while chunk := f.read(8192): # Read in chunks (8KB at a time)
             hasher.update(chunk) # Feed each chunk into the hash
     return hasher.hexdigest() # Return the final hash as a hex string
-
