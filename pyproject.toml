@@ -26,7 +26,7 @@ authors = [
 ]
 
 [project.optional-dependencies]
-gpu = [
+gpu = [ # Required CUPy version depends on your CUDA install.
 	"cupy-cuda12x"
 ]
 

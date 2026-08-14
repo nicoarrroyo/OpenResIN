@@ -48,7 +48,7 @@ The overall goal is to provide a streamlined process from raw satellite data to 
     * `fiona`: For reading and writing geographic data files.
     * `rasterio`: For reading and writing raster datasets.
     * `shapely`: For reading masking files.
-    * `cupy`: (optional, encouraged only for CUDA-compatible GPUs) For speeding up GPU-bound tasks like image compositing. Install with `pip install -e ".[gpu]"`.
+    * `cupy`: (optional, encouraged only for CUDA-compatible GPUs) For speeding up GPU-bound tasks like image compositing. Install with `pip install -e ".[gpu]"`. Without it, STM compositing falls back to `numpy` on the CPU, which is much slower and doesn't always work. I used `cupy-cuda13` with the `cuda13` driver during development, but it should work with other versions (unverified). see the [CUPy installation guide](https://docs.cupy.dev/en/stable/install.html) to pick the correct one.
 
 3.  **Install the package:**
     Installing puts the four pipeline stages on your PATH as console scripts, and lets the modules import each other from anywhere:
