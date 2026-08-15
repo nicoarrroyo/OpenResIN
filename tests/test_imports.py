@@ -11,6 +11,7 @@ PKG_DIR = Path(__file__).resolve().parents[1] / "src" / "openresin"
 # main(): before that, importing label.py opened a tkinter GUI and importing
 # train.py started a training run.
 IMPORTABLE = [
+    "config",
     "data_handling",
     "evaluate",
     "image_handling",

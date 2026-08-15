@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from openresin import krisp_config, nalira_config
+from openresin import krisp_config, nalira_config, config
 
 CONFIGS = [krisp_config, nalira_config]
 CONFIG_IDS = ["krisp_config", "nalira_config"]
@@ -72,7 +72,7 @@ def test_paths_survive_a_changed_working_directory(config, tmp_path, monkeypatch
     assert {name: getattr(reloaded, name) for name in expected} == expected
 
 
-def test_config_not_lazy():
+def test_config_not_lazy_split():
     """Both configs (soon to be one) ship ready to run the pipeline as intended.
 
     Scaled-down runs can be configured by CLI flags. Not by editing the
@@ -98,5 +98,34 @@ def test_config_not_lazy():
         f"is {getattr(module, name)!r}, ships as {expected!r}"
         for module, name, expected in SHIPPED_VALUES
         if getattr(module, name) != expected
+    ]
+    assert not wrong, "config is scaled down:\n  " + "\n  ".join(wrong)
+
+def test_config_not_lazy():
+    """Single config ships ready to run the pipeline as intended.
+
+    Scaled-down runs can be configured by CLI flags. Not by editing the
+    config files.
+    """
+
+    SHIPPED_VALUES = [
+        ("SAVE_MODEL", True),
+        ("EPOCHS", 150),
+        ("N_IMAGES", -1),
+        ("HIGH_RES", True),
+        ("RES", "10m"),
+        ("KNOWN_FEATURE_MASKING", True),
+        ("CLOUD_MASKING", True),
+        ("COMPOSITING", True),
+        ("LABEL_DATA", True),
+        ("SHOW_INDEX_PLOTS", False),
+        ("SAVE_IMAGES", False),
+    ]
+
+    wrong = [
+        f"config.{name} "
+        f"is {getattr(config, name)!r}, ships as {expected!r}"
+        for name, expected in SHIPPED_VALUES
+        if getattr(config, name) != expected
     ]
     assert not wrong, "config is scaled down:\n  " + "\n  ".join(wrong)
