@@ -3,7 +3,7 @@ import os
 # --- Processing Settings ---
 N_CHUNKS                = 5000      # number of chunks into which image is split
 HIGH_RES                = True      # use finer 10m spatial resolution (slower)
-RES = "10m" if HIGH_RES else "60m"  # derived: will not follow a HIGH_RES override
+RES = "10m" if HIGH_RES else "60m"  # derived; see label.apply_overrides
 KNOWN_FEATURE_MASKING   = True
 CLOUD_MASKING           = True
 COMPOSITING             = True

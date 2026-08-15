@@ -16,7 +16,7 @@ import numpy as np
 from matplotlib import cm
 
 # %%% ii. Import Internal Functions
-from . import krisp_config as c
+from . import config as c
 from .data_handling import (
     blank_entry_check,
     check_file_permission,

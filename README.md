@@ -121,12 +121,11 @@ This repository is organised into several key directories:
     - `inference.py`: Large function file used for model deployment. Core prediction logic.
     - `predict.py`: `openresin-predict`. Runs predictions on full tiles and draws the maps.
     - `evaluate.py`: `openresin-evaluate`. Confusion matrix simulation script. Testing environment for `krisp` models.
-    - `krisp_config.py`: Settings and path anchors for the train, predict and evaluate stages.
+    - `config.py`: Settings and path anchors for every stage.
     - `modelling.py`: Dataset loading, model building, training and saving.
     - `train.py`: `openresin-train`. Model training script.
     - `misc.py`: A collection of miscellaneous utility functions.
     - `label.py`: `openresin-label`. Main script for data generation and labelling GUI.
-    - `nalira_config.py`: Settings and path anchors for the label stage.
     - `labelling.py`: The eight labelling steps that `label.py` orchestrates.
     - `user_interfacing.py`: Helper script containing functions for running user interactions.
 

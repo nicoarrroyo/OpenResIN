@@ -7,8 +7,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from . import krisp_config as c
-from . import nalira_config as nc  # seed-label paths; merges into c at Phase 2
+from . import config as c
 from .data_handling import extract_coords
 
 # The tile the recorded responses and predictions belong to. Shared with
@@ -68,7 +67,7 @@ def get_confusion_matrix(model_epochs, confidence_threshold,
     tile_number_field = folder.split("_")[5] # Tile number is field 5 of .SAFE
 
     responses_path = os.path.join(
-        nc.SEED_LABELS_DIR, f"{tile_number_field}-{nc.DATA_FILE_NAME_SUFFIX}")
+        c.SEED_LABELS_DIR, f"{tile_number_field}-{c.DATA_FILE_NAME_SUFFIX}")
     with open(responses_path, mode="r") as file:
         responses = file.readlines()[1:1650]
 

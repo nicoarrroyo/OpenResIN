@@ -20,7 +20,7 @@ from omnicloudmask import predict_from_array
 from tensorflow import keras
 
 # %%% ii. Import Internal Functions
-from . import krisp_config as c
+from . import config as c
 from .data_handling import (
     check_positive_int,
     ensure_folder,

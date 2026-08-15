@@ -3,7 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from . import krisp_config as c
+from . import config as c
 from . import user_interfacing as ui_do
 from .modelling import four_build_model, three_load_dataset
 

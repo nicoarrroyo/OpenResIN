@@ -7,7 +7,7 @@ import time
 
 import matplotlib.pyplot as plt
 
-from . import krisp_config as c
+from . import config as c
 from . import modelling as operation
 from .user_interfacing import end_spinner, list_folders, start_spinner, table_print
 
@@ -51,7 +51,7 @@ def build_parser():
 
 
 def apply_overrides(args):
-    """Write the parsed flags back onto krisp_config.
+    """Write the parsed flags back onto config.
 
     modelling.py reads these constants directly rather than taking them as
     arguments, so a per-run override has to land on the module itself.
