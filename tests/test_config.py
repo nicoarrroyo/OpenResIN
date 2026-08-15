@@ -70,3 +70,33 @@ def test_paths_survive_a_changed_working_directory(config, tmp_path, monkeypatch
     reloaded = importlib.reload(config)
 
     assert {name: getattr(reloaded, name) for name in expected} == expected
+
+
+def test_config_not_lazy():
+    """Both configs (soon to be one) ship ready to run the pipeline as intended.
+
+    Scaled-down runs can be configured by CLI flags. Not by editing the
+    config files.
+    """
+
+    SHIPPED_VALUES = [
+        (krisp_config, "SAVE_MODEL", True),
+        (krisp_config, "EPOCHS", 150),
+        (nalira_config, "N_IMAGES", -1),
+        (nalira_config, "HIGH_RES", True),
+        (nalira_config, "RES", "10m"),
+        (nalira_config, "KNOWN_FEATURE_MASKING", True),
+        (nalira_config, "CLOUD_MASKING", True),
+        (nalira_config, "COMPOSITING", True),
+        (nalira_config, "LABEL_DATA", True),
+        (nalira_config, "SHOW_INDEX_PLOTS", False),
+        (nalira_config, "SAVE_IMAGES", False),
+    ]
+
+    wrong = [
+        f"{module.__name__.rpartition('.')[2]}.{name} "
+        f"is {getattr(module, name)!r}, ships as {expected!r}"
+        for module, name, expected in SHIPPED_VALUES
+        if getattr(module, name) != expected
+    ]
+    assert not wrong, "config is scaled down:\n  " + "\n  ".join(wrong)
