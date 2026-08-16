@@ -631,19 +631,3 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
     # %%% 8. Return
     sorted_results_list = sort_prediction_results(results_list)
     return sorted_results_list
-
-# %% Run the big guy
-if __name__ == "__main__":
-    results = run_model(
-        folder=("S2C_MSIL2A_20250301T111031_N0511_R137_"
-                "T31UCU_20250301T152054.SAFE"),
-        n_chunks=5000, # number of chunks to split the image into
-        model_name="ndwi model epochs-1000.keras",
-        max_multiplier=0.41, # multiply max value of ndwi
-        start_chunk=0,
-        n_chunk_preds=1000
-        )
-
-    # %% Final
-    TOTAL_TIME = time.monotonic() - MAIN_START_TIME
-    print(f"total processing time: {round(TOTAL_TIME, 2)} seconds", flush=True)
