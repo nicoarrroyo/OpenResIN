@@ -4,8 +4,6 @@ Keras Reservoir Identification Sequential Platform
 """
 # %%% i. Import External Libraries
 import time
-
-MAIN_START_TIME = time.monotonic()
 import math
 import os
 import re  # "regular expressions" for parsing filenames
@@ -43,24 +41,10 @@ from .user_interfacing import (
     start_spinner,
 )
 
-# %%% Directory, Plot, and Model Configuration Properties
-dpi = 3000 # 3000 for full resolution, below 1000, images become fuzzy
-n_chunks = 5000 # number of chunks into which images are split
-high_res = True # use finer 10m spatial resolution (slower)
-cloud_masking = True
-show_index_plots = True
-save_images = False
+# module-level, hard-coded settings now moved to config with the other settings.
+# class names are being updated to be consistent. some values may have been
+# slightly changed from their previous defaults defined here prior.
 response_time = 0.0
-
-title_size = 8
-label_size = 4
-plot_size = (5, 5) # larger plots increase detail and pixel count
-plot_size_chunks = (6, 6)
-
-HOME = c.HOME_DIR # repo root, resolved from the config's own file location
-
-class_names = ["land", "reservoirs", "sea", "water bodies"]
-batch_size = 512
 
 # %% Big guy
 def run_model(folder, n_chunks, model_name, max_multiplier,
@@ -83,7 +67,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
     stop_event, thread = start_spinner(message="checking for "
                                        "pre-existing files")
     start_time = time.monotonic()
-    path = os.path.join(HOME, "data", "sat-images", folder)
+    path = os.path.join(c.DATA_DIR, "sat-images", folder)
 
     # %%%% 0.1 Chunk Check!
     test_data_path = os.path.join(path, "test data", f"ndwi_{max_multiplier}")
@@ -198,7 +182,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
         global response_time
 
         # %%% i. Find the Relevant Folders
-        folders_path = os.path.join(HOME, "data", "sat-images")
+        folders_path = os.path.join(c.DATA_DIR, "sat-images")
         folders = list_folders(folders_path)
         # %%% 1. Opening Images and Creating Image Arrays
         for folder in folders:
@@ -239,7 +223,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
             """Low resolution should only be used for troubleshooting as it does
             not produce usable training data. High resolution uses the 10m spatial
             resolution images but processing time is significantly longer."""
-            if high_res:
+            if c.HIGH_RES:
                 res = "10m"
                 path_10 = os.path.join(images_path, "IMG_DATA", "R10m")
             else:
@@ -252,10 +236,10 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
             product_discriminator_and_format) = folder.split("_")
 
             prefix = (f"{tile_number_field}_{datatake_start_sensing_time}")
-            bands = get_sentinel_bands(sentinel_n=2, high_res=high_res)
+            bands = get_sentinel_bands(sentinel_n=2, high_res=c.HIGH_RES)
 
             for band in bands:
-                if high_res:
+                if c.HIGH_RES:
                     file_paths.append(
                     os.path.join(path_10, f"{prefix}_B{band}_10m.jp2")
                     )
@@ -280,7 +264,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
 
             image_arrays = image_to_array(file_paths)
 
-            if cloud_masking:
+            if c.CLOUD_MASKING:
                 image_arrays_clouds = image_arrays
 
             time_taken = time.monotonic() - start_time
@@ -293,7 +277,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
             print("masking out known features")
             start_time = time.monotonic()
 
-            masking_path = os.path.join(HOME, "data", "masks")
+            masking_path = os.path.join(c.DATA_DIR, "masks")
 
             rivers_data = os.path.join(
                 masking_path,
@@ -360,8 +344,8 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
             print("==========")
             print("| STEP 3 |")
             print("==========")
-            if cloud_masking:
-                if not high_res:
+            if c.CLOUD_MASKING:
+                if not c.HIGH_RES:
                     print("WARNING: high-resolution setting is disabled. "
                     "cloud masking may not be accurate")
                     response_time_start = time.monotonic()
@@ -459,13 +443,16 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
         #globals()["ndwi_comp"] = ndwi_composite
 
         # %%%% 5.3 Displaying Index
-        if show_index_plots:
-            if save_images:
+        if c.SHOW_INDEX_PLOTS:
+            if c.SAVE_IMAGES:
                 print("saving and displaying water index images")
             else:
                 print("displaying water index images")
             start_time = time.monotonic()
-            plot_indices(ndwi_mean, plot_size, dpi, save_images,
+            # No dpi argument: plot_indices lost that parameter on the labelling
+            # side and fixes it at 3000 internally. This call still passed it,
+            # which was a TypeError waiting behind the SHOW_INDEX_PLOTS gate.
+            plot_indices(ndwi_mean, c.PLOT_SIZE, c.SAVE_IMAGES,
             folder_path, res)
             time_taken = time.monotonic() - start_time
             print(f"step 5 complete! time taken: {time_taken:.2f} seconds")
@@ -606,7 +593,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
     # Map, batch, prefetch
     image_ds = path_ds.map(load_and_preprocess_image,
                            num_parallel_calls=tf.data.AUTOTUNE)
-    image_batch_ds = image_ds.batch(batch_size)
+    image_batch_ds = image_ds.batch(c.BATCH_SIZE)
     image_batch_ds = image_batch_ds.prefetch(buffer_size=tf.data.AUTOTUNE)
     end_spinner(stop_event, thread)
 
