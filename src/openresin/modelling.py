@@ -10,49 +10,43 @@ from . import config as c
 
 
 # %% 3. Load and prepare dataset
-def three_load_dataset(training_data_path):
-    img_features = {
-        'height':    tf.io.FixedLenFeature([], tf.int64),
-        'width':     tf.io.FixedLenFeature([], tf.int64),
-        'depth':     tf.io.FixedLenFeature([], tf.int64),
-        'label':     tf.io.FixedLenFeature([], tf.int64),
-        'label_text':tf.io.FixedLenFeature([], tf.string),
-        'image_raw': tf.io.FixedLenFeature([], tf.string),
-    }
+def three_load_dataset(patches_path):
+    """Load the labelled patch PNGs from NALIRA, split into train and val.
 
-    def parse_img(example_proto):
-        features = tf.io.parse_single_example(example_proto, img_features)
-        img = tf.io.decode_png(features["image_raw"], channels=3)
-        img = tf.reshape(img, [
-            tf.cast(features["height"], tf.int32),
-            tf.cast(features["width"],  tf.int32),
-            tf.cast(features["depth"],  tf.int32)
-        ])
-        img = tf.image.resize(img, [c.IMG_HEIGHT, c.IMG_WIDTH])
-        return img, features["label"]
+    The directory layout *is* the label: keras takes one class per sub-folder
+    of patches_path, in alphabetical order. The discovered names are returned
+    so the caller can check them against config rather than trusting the tree.
 
-    raw = tf.data.TFRecordDataset(training_data_path)
-    dataset_size = sum(1 for _ in raw)
+    Args:
+        patches_path (str): Directory holding one sub-folder per class.
 
-    shuffled = raw.shuffle(dataset_size, seed=c.RANDOM_SEED,
-                           reshuffle_each_iteration=True)
-    val_size  = int(dataset_size * c.VALIDATION_SPLIT)
+    Returns:
+        tuple: (train_ds, val_ds, class_names).
+    """
+    loader_args = dict(
+        validation_split=c.VALIDATION_SPLIT,
+        seed=c.RANDOM_SEED,
+        image_size=(c.IMG_HEIGHT, c.IMG_WIDTH),
+        batch_size=None, # allow batching after shuffling
+        color_mode="rgb", # patches are greyscale, the model takes 3 channels
+    )
 
-    val_ds   = (shuffled.take(val_size)
-                        .map(parse_img, num_parallel_calls=tf.data.AUTOTUNE)
-                        .batch(c.BATCH_SIZE)
-                        .cache()
-                        .prefetch(tf.data.AUTOTUNE))
+    train_ds = keras.utils.image_dataset_from_directory(
+        patches_path, subset="training", **loader_args)
+    val_ds = keras.utils.image_dataset_from_directory(
+        patches_path, subset="validation", **loader_args)
 
-    train_ds = (shuffled.skip(val_size)
-                        .map(parse_img, num_parallel_calls=tf.data.AUTOTUNE)
-                        .batch(c.BATCH_SIZE)
-                        .cache()
-                        .prefetch(tf.data.AUTOTUNE))
+    class_names = train_ds.class_names
 
-    print(f"dataset loaded: {dataset_size} records, "
-          f"val={val_size}, train={dataset_size - val_size}")
-    return train_ds, val_ds, dataset_size
+    train_ds = (train_ds.cache()
+        .shuffle(c.BUFFER_SIZE, seed=c.RANDOM_SEED)
+        .batch(c.BATCH_SIZE)
+        .prefetch(tf.data.AUTOTUNE))
+    val_ds = (val_ds.batch(c.BATCH_SIZE)
+        .cache()
+        .prefetch(tf.data.AUTOTUNE))
+
+    return train_ds, val_ds, class_names
 
 
 # %% 4. Build model

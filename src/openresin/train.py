@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from . import config as c
 from . import modelling as operation
-from .user_interfacing import end_spinner, list_folders, start_spinner, table_print
+from .user_interfacing import end_spinner, start_spinner, table_print
 
 
 def build_parser():
@@ -40,13 +40,6 @@ def build_parser():
         help="plot accuracy and loss curves when training finishes "
              "(default: %(default)s)")
 
-    # --folder is not a setting, it is which data to run against, so it has no
-    # config constant and is read straight off args below.
-    parser.add_argument(
-        "--folder", default=None,
-        help="the .SAFE folder under data/sat-images holding the training "
-             "data (default: the first one found)")
-
     return parser
 
 
@@ -69,26 +62,16 @@ def main(argv=None):
     apply_overrides(args)
 
 
-    # Without --folder, list_folders returns every .SAFE tile it recognises
-    # and we take the first. Same convention as epoch_pathfinder.py, which
-    # trains off the same data.
-    # Upcoming change is adopting compositing like NALIRA.
-    folders_path = os.path.join(c.DATA_DIR, "sat-images")
-    folder = args.folder if args.folder else list_folders(folders_path)[0]
-
     MAIN_START_TIME = time.monotonic()
 
     # %% 1. Validate paths
     print("----------")
     print("| STEP 1 |")
     print("----------")
-    training_data_path = os.path.join(
-        folders_path, folder,
-        "training data", "training_data_1.tfrecord")
-    model_save_dir = c.MODELS_DIR
 
-    if not os.path.exists(training_data_path):
-        print(f"error: training data not found at {training_data_path}")
+    if not os.path.isdir(c.PATCHES_DIR) or not os.listdir(c.PATCHES_DIR):
+        print(f"error: no training patches found at {c.PATCHES_DIR}")
+        print("run openresin-label to write them before training")
         return 1
     print("paths validated")
 
@@ -107,8 +90,14 @@ def main(argv=None):
     print("----------")
     print("| STEP 3 |")
     print("----------")
-    train_ds, val_ds, dataset_size = operation.three_load_dataset(training_data_path)
-    num_classes = len(c.CLASS_NAMES)
+    train_ds, val_ds, class_names = operation.three_load_dataset(c.PATCHES_DIR)
+    if class_names != c.CLASS_NAMES:
+        # the folder names are the labels, and predict/evaluate map indices
+        # back through CLASS_NAMES, so a stray folder mislabels everything
+        print(f"error: patch folders {class_names} do not match "
+              f"CLASS_NAMES {c.CLASS_NAMES}")
+        return 1
+    num_classes = len(class_names)
 
     # %% 4. Build model
     print("----------")
@@ -134,7 +123,7 @@ def main(argv=None):
     print("----------")
     print("| STEP 6 |")
     print("----------")
-    operation.six_save_model(model, history, model_save_dir)
+    operation.six_save_model(model, history, c.MODELS_DIR)
 
     # %% 7. Visualize
     print("----------")
