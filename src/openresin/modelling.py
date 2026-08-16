@@ -27,7 +27,7 @@ def three_load_dataset(patches_path):
         validation_split=c.VALIDATION_SPLIT,
         seed=c.RANDOM_SEED,
         image_size=(c.IMG_HEIGHT, c.IMG_WIDTH),
-        batch_size=c.BATCH_SIZE,
+        batch_size=None, # allow batching after shuffling
         color_mode="rgb", # patches are greyscale, the model takes 3 channels
     )
 
@@ -38,11 +38,13 @@ def three_load_dataset(patches_path):
 
     class_names = train_ds.class_names
 
-    train_ds = train_ds.cache()
-    train_ds = train_ds.shuffle(buffer_size=c.BUFFER_SIZE, seed=c.RANDOM_SEED)
-    train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
-
-    val_ds = val_ds.cache().prefetch(tf.data.AUTOTUNE)
+    train_ds = (train_ds.cache()
+        .shuffle(c.BUFFER_SIZE, seed=c.RANDOM_SEED)
+        .batch(c.BATCH_SIZE)
+        .prefetch(tf.data.AUTOTUNE))
+    val_ds = (val_ds.batch(c.BATCH_SIZE)
+        .cache()
+        .prefetch(tf.data.AUTOTUNE))
 
     return train_ds, val_ds, class_names
 
