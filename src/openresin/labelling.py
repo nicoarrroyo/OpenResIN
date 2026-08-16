@@ -780,7 +780,13 @@ def eight_segment_data(data_file_path, index_chunks, patches_path, prefix):
     the NDWI chunks for four classes: reservoirs, water-bodies, land, and sea.
     Unlabelled land/sea chunks use a fixed centre-crop. Computes global
     normalization bounds to improve feature contrast, replaces NaN values with
-    a distinguishable mid-grey, and saves the patches as 8-bit greyscale PNGs.
+    a distinguishable mid-grey, and saves the patches as 8-bit greyscale PNGs
+    named `{tile}-{date}-{index}.png`.
+
+    Re-running on a scene already present in `PATCHES_DIR` replaces all the saved
+    PNGs from previous runs. This is not as expensive as it sounds, and it is the
+    only way to do saving on counter-based naming. A future planned improvement
+    is to adopt content-based naming. Other scenes' patches are untouched.
 
     Args:
         data_file_path (str): Path to the labelled CSV file containing
@@ -870,6 +876,11 @@ def eight_segment_data(data_file_path, index_chunks, patches_path, prefix):
 
     saved_counts = {}
 
+    # indices only have to be unique within one scene (tile and date are fixed)
+    img_tile = str(prefix.split('_')[0])
+    img_date = str(prefix.split('_')[1].split('T')[0])
+    scene_prefix = f"{img_tile}-{img_date}"
+
     for coords_list, class_name in all_coords:
         print(f"{len(coords_list)} examples for class '{class_name}'")
 
@@ -877,18 +888,13 @@ def eight_segment_data(data_file_path, index_chunks, patches_path, prefix):
         class_dir = os.path.join(patches_path, class_name)
         os.makedirs(class_dir, exist_ok=True)
 
-        # find the highest existing image index to avoid overwriting
-        existing = [f for f in os.listdir(class_dir) if f.endswith(".png")]
-        if existing:
-            indices = []
-            for name in existing:
-                try:
-                    indices.append(int(os.path.splitext(name)[0].split("-")[-1]))
-                except ValueError:
-                    pass
-            start_index = max(indices) + 1 if indices else 0
-        else:
-            start_index = 0
+        stale = [f for f in os.listdir(class_dir)
+                 if f.startswith(f"{scene_prefix}-") and f.endswith(".png")]
+        for name in stale:
+            os.remove(os.path.join(class_dir, name))
+        if stale:
+            print(f"replacing {len(stale)} existing '{class_name}' patches "
+                  f"for {scene_prefix}")
 
         saved = 0
         for idx, (chunk_n_raw, coordinates) in enumerate(coords_list):
@@ -929,10 +935,7 @@ def eight_segment_data(data_file_path, index_chunks, patches_path, prefix):
             patch_uint8[nan_mask] = 128
 
             img = Image.fromarray(patch_uint8, mode="L") # greyscale PNG
-            img_tile = str(prefix.split('_')[0])
-            img_date = str(prefix.split('_')[1].split('T')[0])
-            img_index = start_index + saved
-            file_name = f"{img_tile}-{img_date}-{img_index:04d}.png"
+            file_name = f"{scene_prefix}-{saved:04d}.png"
             img.save(os.path.join(class_dir, file_name))
             saved += 1
 
