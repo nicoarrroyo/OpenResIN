@@ -1,7 +1,7 @@
 import numpy as np
 import random
 import math
-from . import nalira_config as c
+from . import config as c
 from . import user_interfacing as ui_do
 
 def pre_run_checks():
@@ -146,8 +146,7 @@ def get_sentinel_bands(sentinel_n, high_res):
     resolution: B08 exists at 10m, B8A only at 20m and 60m.
 
     Note this returns five bands (blue, green, NIR, SWIR1, SWIR2) whereas
-    nalira_config.BAND_MAP_H/L covers three. The two are not interchangeable;
-    see BACKLOG.md.
+    config.BAND_MAP_H/L covers three. The two are not interchangeable; Fix planned
     """
     if sentinel_n == 2:
         BLUE_BAND = '02'

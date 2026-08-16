@@ -1,16 +1,10 @@
 import os
 from pathlib import Path
 
-import pytest
-
-from openresin import krisp_config, nalira_config
-
-CONFIGS = [krisp_config, nalira_config]
-CONFIG_IDS = ["krisp_config", "nalira_config"]
+from openresin import config
 
 
-@pytest.mark.parametrize("config", CONFIGS, ids=CONFIG_IDS)
-def test_home_dir_is_repo_root(config):
+def test_home_dir_is_repo_root():
     """HOME_DIR is the repo root, not src/ and not the package directory.
 
     The move to src/openresin/ left this one level short, pointing at src/, so
@@ -27,24 +21,13 @@ def test_home_dir_is_repo_root(config):
         f"HOME_DIR {home} has no pyproject.toml, so it is not the repo root")
 
 
-@pytest.mark.parametrize("config", CONFIGS, ids=CONFIG_IDS)
-def test_data_dir_exists(config):
+def test_data_dir_exists():
     """DATA_DIR points somewhere real. Cheap, and it is the path that broke."""
     assert Path(config.DATA_DIR).is_dir(), (
         f"DATA_DIR does not exist: {config.DATA_DIR}")
 
 
-def test_both_configs_agree_on_home_dir():
-    """The two configs compute the same root independently.
-
-    They duplicate the anchor until Phase 2 merges them, so this fails if one
-    is edited and the other is not.
-    """
-    assert krisp_config.HOME_DIR == nalira_config.HOME_DIR
-
-
-@pytest.mark.parametrize("config", CONFIGS, ids=CONFIG_IDS)
-def test_paths_are_absolute(config):
+def test_paths_are_absolute():
     """A relative path here would silently re-acquire the cwd dependency the
     package just had removed."""
     relative = [
@@ -54,8 +37,7 @@ def test_paths_are_absolute(config):
     assert not relative, f"not absolute: {relative}"
 
 
-@pytest.mark.parametrize("config", CONFIGS, ids=CONFIG_IDS)
-def test_paths_survive_a_changed_working_directory(config, tmp_path, monkeypatch):
+def test_paths_survive_a_changed_working_directory(tmp_path, monkeypatch):
     """Re-importing from an unrelated cwd yields identical paths.
 
     This is the property the whole chdir removal exists to provide, so it is
@@ -73,30 +55,30 @@ def test_paths_survive_a_changed_working_directory(config, tmp_path, monkeypatch
 
 
 def test_config_not_lazy():
-    """Both configs (soon to be one) ship ready to run the pipeline as intended.
+    """Single config ships ready to run the pipeline as intended.
 
     Scaled-down runs can be configured by CLI flags. Not by editing the
     config files.
     """
 
-    SHIPPED_VALUES = [
-        (krisp_config, "SAVE_MODEL", True),
-        (krisp_config, "EPOCHS", 150),
-        (nalira_config, "N_IMAGES", -1),
-        (nalira_config, "HIGH_RES", True),
-        (nalira_config, "RES", "10m"),
-        (nalira_config, "KNOWN_FEATURE_MASKING", True),
-        (nalira_config, "CLOUD_MASKING", True),
-        (nalira_config, "COMPOSITING", True),
-        (nalira_config, "LABEL_DATA", True),
-        (nalira_config, "SHOW_INDEX_PLOTS", False),
-        (nalira_config, "SAVE_IMAGES", False),
+    shipped_values = [
+        ("SAVE_MODEL", True),
+        ("EPOCHS", 150),
+        ("N_IMAGES", -1),
+        ("HIGH_RES", True),
+        ("RES", "10m"),
+        ("KNOWN_FEATURE_MASKING", True),
+        ("CLOUD_MASKING", True),
+        ("COMPOSITING", True),
+        ("LABEL_DATA", True),
+        ("SHOW_INDEX_PLOTS", False),
+        ("SAVE_IMAGES", False),
     ]
 
     wrong = [
-        f"{module.__name__.rpartition('.')[2]}.{name} "
-        f"is {getattr(module, name)!r}, ships as {expected!r}"
-        for module, name, expected in SHIPPED_VALUES
-        if getattr(module, name) != expected
+        f"config.{name} "
+        f"is {getattr(config, name)!r}, ships as {expected!r}"
+        for name, expected in shipped_values
+        if getattr(config, name) != expected
     ]
     assert not wrong, "config is scaled down:\n  " + "\n  ".join(wrong)

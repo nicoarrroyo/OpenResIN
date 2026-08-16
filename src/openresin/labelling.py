@@ -14,7 +14,7 @@ from PIL import Image
 from . import data_handling as data_do
 from . import image_handling as image_do
 from . import misc
-from . import nalira_config as c
+from . import config as c
 from . import user_interfacing as ui_do
 
 

@@ -3,14 +3,14 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from . import krisp_config as c
+from . import config as c
 from . import user_interfacing as ui_do
 from .modelling import four_build_model, three_load_dataset
 
 EPOCH_SETTINGS = list(range(50, 175, 25))
 NUM_REPEATS    = 2
 
-folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
+folders_path = os.path.join(c.DATA_DIR, "sat-images")
 folders = ui_do.list_folders(folders_path)[0]
 
 training_data_path = ...  # same path logic as trainer

@@ -11,15 +11,14 @@ PKG_DIR = Path(__file__).resolve().parents[1] / "src" / "openresin"
 # main(): before that, importing label.py opened a tkinter GUI and importing
 # train.py started a training run.
 IMPORTABLE = [
+    "config",
     "data_handling",
     "evaluate",
     "image_handling",
     "inference",
-    "krisp_config",
     "label",
     "misc",
     "modelling",
-    "nalira_config",
     "predict",
     "train",
     "user_interfacing",
@@ -42,7 +41,7 @@ def _bound_at_module_level(tree):
     """Names a module binds at module level.
 
     Covers defs, classes, assignments and imports, including those nested one
-    level inside if/try/for/while; krisp_config and others define names that
+    level inside if/try/for/while; config and others define names that
     way, and treating them as missing would be a false positive.
     """
     names = set()

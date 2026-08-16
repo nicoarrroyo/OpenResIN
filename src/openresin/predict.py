@@ -16,7 +16,7 @@ import numpy as np
 from matplotlib import cm
 
 # %%% ii. Import Internal Functions
-from . import krisp_config as c
+from . import config as c
 from .data_handling import (
     blank_entry_check,
     check_file_permission,
@@ -88,8 +88,6 @@ def main(argv=None):
     save_map = args.save_map
 
     # %%% iii. Directory Management
-    HOME = c.HOME_DIR # repo root, resolved from the config's own file location
-
     n_chunks = 5000 # do not change!!
     confidence_threshold = 40 # do not change!! these are calculated
 
@@ -105,7 +103,7 @@ def main(argv=None):
 
     # %% prelim
     stop_event, thread = start_spinner(message="pre-run preparation")
-    folder_path = os.path.join(HOME, "data", "sat-images", folder)
+    folder_path = os.path.join(c.DATA_DIR, "sat-images", folder)
 
     (sentinel_name, instrument_and_product_level, datatake_start_sensing_time,
      processing_baseline_number, relative_orbit_number, tile_number_field,

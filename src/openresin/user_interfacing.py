@@ -8,7 +8,7 @@ from collections import defaultdict
 import numpy as np
 from PIL import Image, ImageTk
 
-from . import nalira_config as c
+from . import config as c
 
 
 def table_print(**kwargs):
@@ -79,7 +79,7 @@ def list_folders(folders_path):
 
     if c.N_IMAGES < -1 or not isinstance(c.N_IMAGES, int):
         print(f"WARNING: N_IMAGES has a bad value: {c.N_IMAGES}")
-        print("Check nalira_config file to fix") # TODO eventually rename
+        print("Check config file to fix")
         sys.exit(1)
     elif c.N_IMAGES == -1:
         n_images = len(folders)

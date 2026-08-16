@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import Sequential, layers
 
-from . import krisp_config as c
+from . import config as c
 
 
 # %% 3. Load and prepare dataset

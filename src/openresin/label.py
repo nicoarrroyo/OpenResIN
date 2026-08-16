@@ -56,7 +56,7 @@ import os
 import numpy as np
 
 from . import labelling as operation
-from . import nalira_config as c
+from . import config as c
 from . import user_interfacing as ui_do
 from .misc import pre_run_checks  #, lp_check
 
@@ -111,7 +111,7 @@ def build_parser():
 
 
 def apply_overrides(args):
-    """Write the parsed flags back onto nalira_config.
+    """Write the parsed flags back onto config.
 
     The config file is read by labelling.py and user_interfacing.py, not
     passed down as arguments, so a per-run override has to land on the module
@@ -140,7 +140,7 @@ def main(argv=None):
     apply_overrides(args)
 
 
-    folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
+    folders_path = os.path.join(c.DATA_DIR, "sat-images")
     folders = ui_do.list_folders(folders_path)
 
     LP_MODE = pre_run_checks()
