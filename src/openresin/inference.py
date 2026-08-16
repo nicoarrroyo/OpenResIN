@@ -613,7 +613,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
         # Apply softmax to get probabilities because the model outputs logits
         score = tf.nn.softmax(prediction)
         predicted_class_index = np.argmax(score)
-        predicted_class_name = class_names[predicted_class_index].upper()
+        predicted_class_name = c.CLASS_NAMES[predicted_class_index].upper()
 
         confidence = (100 * np.max(score)).astype(np.float32)
 

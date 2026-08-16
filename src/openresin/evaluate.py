@@ -132,20 +132,20 @@ def get_confusion_matrix(model_epochs, confidence_threshold,
                 confidence = float(cell.split(" ")[-1])
             except:
                 confidence = 100
-            if "reservoir" in cell.strip().lower():
+            label = cell.strip().lower().replace("-", " ")
+            if "reservoir" in label:
                 if confidence >= confidence_threshold:
                     res_predictions += 1
                 else:
                     land_predictions += 1
-            # the cell will be separated into three different
-            elif "water bod" in cell.strip().lower():
+            elif "water bod" in label:
                 if confidence >= confidence_threshold:
                     bod_predictions += 1
                 else:
                     land_predictions += 1
-            elif "land" in cell.strip().lower():
+            elif "land" in label:
                 land_predictions += 1
-            elif "sea" in cell.strip().lower():
+            elif "sea" in label:
                 sea_predictions += 1
 
         tp_res, tn_res, fp_res, fn_res = update_counts(res_predictions,

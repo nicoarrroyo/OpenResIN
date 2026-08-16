@@ -54,7 +54,7 @@ IMG_WIDTH       = int(157 / 5)
 BATCH_SIZE      = 256
 VALIDATION_SPLIT = 0.2
 RANDOM_SEED     = 123
-CLASS_NAMES     = ["land", "reservoirs", "sea", "water bodies"]
+CLASS_NAMES     = ["land", "reservoirs", "sea", "water-bodies"]
 
 # -- Default tile --
 # No-flag fallback for `predict` and `evaluate`. Will be replaced with
