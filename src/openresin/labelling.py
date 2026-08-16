@@ -92,9 +92,8 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
     image_arrays = image_do.image_to_array(file_paths)
 
     # 1.2.2 Opening and Converting True Colour Images
-    if not tci_60_array.any():
-        tci_array = np.empty([1,1])
-        tci_60_array = np.empty([1,1])
+    tci_array = np.empty([1,1])
+    tci_60_array = np.empty([1,1])
     if c.LABEL_DATA:
         print(f"opening {c.RES} resolution true colour image")
 

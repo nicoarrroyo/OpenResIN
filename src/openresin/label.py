@@ -156,7 +156,7 @@ def main(argv=None):
                          "is not supported yet, but your responses will be saved."),
             solution="Accept the switch to LP_MODE.")
         image_arrays_list = []
-    ui_do.confirm_continue_or_exit()
+        ui_do.confirm_continue_or_exit()
 
     ui_do.table_print(
         n_chunks=c.N_CHUNKS, n_images=c.N_IMAGES, high_res=c.HIGH_RES,
@@ -291,7 +291,7 @@ def main(argv=None):
     print("----------")
     if LP_MODE:
         print("skipping data segmentation (not supported in LP MODE)")
-    elif not c.LABEL_DATA:
+    elif not c.LABEL_DATA: # known limitation
         print("skipping data segmentation (labelling was skipped)")
     else:
         operation.eight_segment_data(
