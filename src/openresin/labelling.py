@@ -884,7 +884,7 @@ def eight_segment_data(data_file_path, index_chunks, patches_path, prefix):
             indices = []
             for name in existing:
                 try:
-                    indices.append(int(os.path.splitext(name)[0].split("_")[-1]))
+                    indices.append(int(os.path.splitext(name)[0].split("-")[-1]))
                 except ValueError:
                     pass
             start_index = max(indices) + 1 if indices else 0
