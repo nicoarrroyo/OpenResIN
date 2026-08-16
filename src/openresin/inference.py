@@ -449,9 +449,6 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
             else:
                 print("displaying water index images")
             start_time = time.monotonic()
-            # No dpi argument: plot_indices lost that parameter on the labelling
-            # side and fixes it at 3000 internally. This call still passed it,
-            # which was a TypeError waiting behind the SHOW_INDEX_PLOTS gate.
             plot_indices(ndwi_mean, c.PLOT_SIZE, c.SAVE_IMAGES,
             folder_path, res)
             time_taken = time.monotonic() - start_time
