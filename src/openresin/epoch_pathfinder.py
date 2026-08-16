@@ -1,22 +1,15 @@
-import os
-
 import matplotlib.pyplot as plt
 import numpy as np
 
 from . import config as c
-from . import user_interfacing as ui_do
 from .modelling import four_build_model, three_load_dataset
 
 EPOCH_SETTINGS = list(range(50, 175, 25))
 NUM_REPEATS    = 2
 
-folders_path = os.path.join(c.DATA_DIR, "sat-images")
-folders = ui_do.list_folders(folders_path)[0]
-
-training_data_path = ...  # same path logic as trainer
-
-train_ds, val_ds, _ = three_load_dataset(training_data_path)
-num_classes = len(c.CLASS_NAMES)
+# same source as the trainer: the patch PNGs NALIRA wrote
+train_ds, val_ds, class_names = three_load_dataset(c.PATCHES_DIR)
+num_classes = len(class_names)
 
 results = {}
 for epochs in EPOCH_SETTINGS:
