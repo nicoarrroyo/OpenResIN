@@ -140,7 +140,7 @@ def main(argv=None):
     apply_overrides(args)
 
 
-    folders_path = os.path.join(c.HOME_DIR, "data", "sat-images")
+    folders_path = os.path.join(c.DATA_DIR, "sat-images")
     folders = ui_do.list_folders(folders_path)
 
     LP_MODE = pre_run_checks()

@@ -535,12 +535,11 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
     height = int(157 / mc_per_len)
     width = int(157 / mc_per_len)
 
-    models_path = c.MODELS_DIR
-    model_names = os.listdir(models_path)
+    model_names = os.listdir(c.MODELS_DIR)
     found_model = False
     for name in model_names:
         if model_name in name:
-            model_path = os.path.join(models_path, model_name)
+            model_path = os.path.join(c.MODELS_DIR, model_name)
             found_model = True
             break
 
@@ -558,7 +557,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
                     print("not a possible model number")
                 else:
                     model_name = model_names[model_choice]
-                    model_path = os.path.join(models_path, model_name)
+                    model_path = os.path.join(c.MODELS_DIR, model_name)
                     break
             except Exception as e:
                 print(e)
