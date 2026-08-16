@@ -38,7 +38,10 @@ def three_load_dataset(patches_path):
 
     class_names = train_ds.class_names
 
-    train_ds = train_ds.cache().prefetch(tf.data.AUTOTUNE)
+    train_ds = train_ds.cache()
+    train_ds = train_ds.shuffle(buffer_size=c.BUFFER_SIZE, seed=c.RANDOM_SEED)
+    train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
+
     val_ds = val_ds.cache().prefetch(tf.data.AUTOTUNE)
 
     return train_ds, val_ds, class_names

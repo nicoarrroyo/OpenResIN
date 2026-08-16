@@ -53,6 +53,7 @@ IMG_HEIGHT      = int(157 / 5)  # must match BOX_SIZE in data_handling
 IMG_WIDTH       = int(157 / 5)
 BATCH_SIZE      = 256
 VALIDATION_SPLIT = 0.2
+BUFFER_SIZE     = 1000
 RANDOM_SEED     = 123
 CLASS_NAMES     = ["land", "reservoirs", "sea", "water-bodies"]
 
