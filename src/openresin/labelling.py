@@ -114,8 +114,8 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
             tci_array,
             tci_60_array]
 
-# %% 2. Masking out known features
-def two_mask_known_feature(index_array, image_metadata, fill=np.nan):
+# %% 5. Masking out known features
+def five_mask_known_feature(index_array, image_metadata, fill=np.nan):
     """
     Applies geographic masks to an image array to remove known features.
 
@@ -134,7 +134,7 @@ def two_mask_known_feature(index_array, image_metadata, fill=np.nan):
     Returns:
         np.ndarray: The index array with known features masked out.
     """
-    print(f"step 2 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("masking out known features")
 
     masking_path = os.path.join(c.DATA_DIR, "masks")
@@ -217,11 +217,11 @@ def two_mask_known_feature(index_array, image_metadata, fill=np.nan):
         print("TRYING: skip step. User must source the file.")
         ui_do.confirm_continue_or_exit()
 
-    print(f"step 2 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
+    print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return index_array
 
-# %% 3. Masking out clouds (OmniCloudMask) (iterative)
-def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
+# %% 2. Masking out clouds (OmniCloudMask) (iterative)
+def two_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
                       batch_size=4, inference_device="cuda",
                       inference_dtype="bf16", LP_MODE=False):
 
@@ -231,7 +231,7 @@ def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
         "cloud masking may not be accurate")
         ui_do.confirm_continue_or_exit()
 
-    print(f"step 3 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    print(f"step 2 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("masking clouds")
     input_array = np.stack(
         (
@@ -284,13 +284,13 @@ def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
     import torch
     torch.cuda.empty_cache()
 
-    print(f"step 3 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
+    print(f"step 2 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return image_arrays
 
-# %% 4. Compute water indices (iterative)
-def four_compute_indices(image_arrays):
+# %% 3. Compute water indices (iterative)
+def three_compute_indices(image_arrays):
 
-    print(f"step 4 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    print(f"step 3 beginning at {dt.datetime.now().time():%H:%M:%S}")
 
     print("converting image array types")
     # first convert to float32 (np.uint16 type is bad for algebraic operations)!
@@ -298,7 +298,7 @@ def four_compute_indices(image_arrays):
         image_arrays[i] = image_array.astype(np.float32)
     green, nir, red = image_arrays
 
-    # 4.2 Calculating Indices
+    # 3.2 Calculating Indices
     print("populating index arrays")
     np.seterr(divide="ignore", invalid="ignore")
 
@@ -317,12 +317,12 @@ def four_compute_indices(image_arrays):
 
     indices = {"ndwi":ndwi}
 
-    print(f"step 4 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
+    print(f"step 3 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return indices
 
-# %% 5. Image compositing (and plotting)
-def five_composite(index_arrays):
-    print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
+# %% 4. Image compositing (and plotting)
+def four_composite(index_arrays):
+    print(f"step 4 beginning at {dt.datetime.now().time():%H:%M:%S}")
     try: # start by checking for cuda install
         import cupy; del cupy;
         use_cuda = True
@@ -358,11 +358,11 @@ def five_composite(index_arrays):
             "mean"  : mean
             })
 
-    print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
+    print(f"step 4 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return stms
 
-def five_mean(index_arrays):
-    print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
+def four_mean(index_arrays):
+    print(f"step 4 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("calculating basic mean of all images")
     mean = {}
 
@@ -376,7 +376,7 @@ def five_mean(index_arrays):
         stack = np.stack(arrays_list)
         mean[index_name] = np.nanmean(stack, axis=0)
 
-    print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
+    print(f"step 4 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return mean
 
 def fiveb_plot(labelling_array, folder_path):
@@ -558,7 +558,7 @@ def lp_chunk_processing(imgs, i):
     for img in imgs:
         current_chunk = [img[band][i] for band in range(len(img))]
 
-        masked_chunk = three_mask_clouds(
+        masked_chunk = two_mask_clouds(
             current_chunk,
             patch_size=75,
             patch_overlap=64,
@@ -568,12 +568,12 @@ def lp_chunk_processing(imgs, i):
             LP_MODE=True)
         print("cloud masking complete")
 
-        indices = four_compute_indices(masked_chunk)
+        indices = three_compute_indices(masked_chunk)
         for key in index_arrays:
             index_arrays[key].append(indices[key])
         print("index calculation complete")
 
-    stms = five_composite(index_arrays)
+    stms = four_composite(index_arrays)
     labelling_array = stms["ndwi"]["mean"] # TODO replace with full stm
 
     time_taken = round(time.monotonic() - start_time, 1)
