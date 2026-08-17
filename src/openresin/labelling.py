@@ -114,21 +114,25 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
             tci_array,
             tci_60_array]
 
-# %% 2. Masking out known features (iterative)
-def two_mask_known_feature(image_arrays, image_metadata):
+# %% 2. Masking out known features
+def two_mask_known_feature(index_array, image_metadata, fill=np.nan):
     """
-    Applies geographic masks to the image arrays to remove known features.
+    Applies geographic masks to an image array to remove known features.
 
     Uses shapefiles and GeoTIFFs to mask out rivers, the sea, known reservoirs,
     and urban areas from the satellite imagery. This prevents these features
     from causing false positives during the water body identification training.
 
+    Designed to run on a single image array. Can be a composite or just a
+    single band, but it is intended to be the composite.
+
     Args:
-        image_arrays (list): List of image band arrays (Green, NIR, Red).
+        index_array (np.ndarray): e.g. NDWI median
         image_metadata (dict): Metadata associated with the rasterized images.
+        Can be taken from any image of a given tile.
 
     Returns:
-        list: The modified image_arrays with known features masked out.
+        np.ndarray: The index array with known features masked out.
     """
     print(f"step 2 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("masking out known features")
@@ -163,55 +167,58 @@ def two_mask_known_feature(image_arrays, image_metadata):
         "gblcm2024_10m.tif"
         )
 
-    for i in range(len(image_arrays)):
-        try:
-            image_arrays[i] = image_do.known_feature_mask(
-                image_arrays[i],
-                image_metadata,
-                rivers_data,
-                feature_type="rivers",
-                buffer_metres=20
-                )
-        except Exception as e:
-            print(f"FAILURE: river masking (due to error: {e})")
-            print("TRYING: skip step. User must source the file.")
-            ui_do.confirm_continue_or_exit()
-        try:
-            image_arrays[i] = image_do.known_feature_mask(
-                image_arrays[i],
-                image_metadata,
-                boundaries_data,
-                feature_type="sea"
-                )
-        except Exception as e:
-            print(f"FAILURE: sea masking (due to error: {e})")
-            print("TRYING: skip step. User must source the file.")
-            ui_do.confirm_continue_or_exit()
-        try:
-            image_arrays[i] = image_do.known_feature_mask(
-                image_arrays[i],
-                image_metadata,
-                known_reservoirs_data,
-                feature_type="known reservoirs",
-                buffer_metres=50
-                )
-        except Exception as e:
-            print(f"FAILURE: known reservoir masking (due to error: {e})")
-            print("TRYING: skip step. User must source the file.")
-            ui_do.confirm_continue_or_exit()
-        try:
-            image_arrays[i] = image_do.mask_urban_areas( # different process (.tif)
-                image_arrays[i],
-                image_metadata,
-                urban_areas_data
-                )
-        except Exception as e:
-            print(f"FAILURE: urban area masking (due to error: {e})")
-            print("TRYING: skip step. User must source the file.")
-            ui_do.confirm_continue_or_exit()
+    try:
+        index_array = image_do.known_feature_mask(
+            index_array,
+            image_metadata,
+            rivers_data,
+            feature_type="rivers",
+            buffer_metres=20,
+            fill=fill
+            )
+    except Exception as e:
+        print(f"FAILURE: river masking (due to error: {e})")
+        print("TRYING: skip step. User must source the file.")
+        ui_do.confirm_continue_or_exit()
+    try:
+        index_array = image_do.known_feature_mask(
+            index_array,
+            image_metadata,
+            boundaries_data,
+            feature_type="sea",
+            fill=fill
+            )
+    except Exception as e:
+        print(f"FAILURE: sea masking (due to error: {e})")
+        print("TRYING: skip step. User must source the file.")
+        ui_do.confirm_continue_or_exit()
+    try:
+        index_array = image_do.known_feature_mask(
+            index_array,
+            image_metadata,
+            known_reservoirs_data,
+            feature_type="known reservoirs",
+            buffer_metres=50,
+            fill=fill
+            )
+    except Exception as e:
+        print(f"FAILURE: known reservoir masking (due to error: {e})")
+        print("TRYING: skip step. User must source the file.")
+        ui_do.confirm_continue_or_exit()
+    try:
+        index_array = image_do.mask_urban_areas( # different process (.tif)
+            index_array,
+            image_metadata,
+            urban_areas_data,
+            fill=fill
+            )
+    except Exception as e:
+        print(f"FAILURE: urban area masking (due to error: {e})")
+        print("TRYING: skip step. User must source the file.")
+        ui_do.confirm_continue_or_exit()
 
     print(f"step 2 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
-    return image_arrays
+    return index_array
 
 # %% 3. Masking out clouds (OmniCloudMask) (iterative)
 def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,

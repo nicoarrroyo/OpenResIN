@@ -142,18 +142,7 @@ def main(argv=None):
         if LP_MODE:
             image_arrays_list.append(image_arrays)
 
-        # %% 2. Mask Known Features
-        print("----------")
-        print("| STEP 2 |")
-        print("----------")
-        if c.KNOWN_FEATURE_MASKING:
-            image_arrays = operation.two_mask_known_feature(
-                image_arrays,
-                image_metadata)
-            if LP_MODE: # overwrite previous image arrays if features get masked
-                image_arrays_list[folder_num] = image_arrays
-        elif not c.KNOWN_FEATURE_MASKING:
-            print("skipping known feature masking")
+        # moving known-feature masking from step 2 to step 5 (after composite)
 
         # %% 3. Mask Clouds (Omnicloudmask)
         print("----------")
@@ -189,8 +178,22 @@ def main(argv=None):
         elif not c.COMPOSITING:
             labelling_array = operation.five_mean(index_arrays)["ndwi"]
     elif LP_MODE:
-        labelling_array = image_arrays_list # known features get masked in LP_MODE
+        labelling_array = image_arrays_list
         print("skipping image compositing (done during labelling)")
+
+    # %% 2. Mask Known Features
+    print("----------")
+    print("| STEP 2 |")
+    print("----------")
+    if LP_MODE:
+        print("skipping known feature masking (not supported in LP MODE)")
+    elif c.KNOWN_FEATURE_MASKING:
+        # not masking other STMs for now
+        labelling_array = operation.two_mask_known_feature(
+            labelling_array,
+            image_metadata)
+    else:
+        print("skipping known feature masking")
 
     if c.SHOW_INDEX_PLOTS and not LP_MODE:
         operation.fiveb_plot(labelling_array, folders_path)
