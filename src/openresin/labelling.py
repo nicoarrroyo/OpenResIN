@@ -271,6 +271,12 @@ def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
         image_arrays[i] = image_arrays[i].astype(np.float32)
         image_arrays[i][combined_mask] = np.nan
 
+    # torch has to be instructed to release memory
+    # without this step, the image compositing has to operate on shared
+    # memory because torch is occupying all the gpu memory
+    import torch
+    torch.cuda.empty_cache()
+
     print(f"step 3 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return image_arrays
 
@@ -290,7 +296,8 @@ def four_compute_indices(image_arrays):
     np.seterr(divide="ignore", invalid="ignore")
 
     ndwi = (green - nir) / (green + nir)
-    ndvi = ((nir - red) / (nir + red))
+
+    # ndvi = ((nir - red) / (nir + red))
 
     # gain factor g, aerosol resistance coefficient c1 & c2
     # evi_num = g * (nir - red)
@@ -301,7 +308,7 @@ def four_compute_indices(image_arrays):
     # evi2 = 2.4 * (nir - red) / (nir + red + 1) # 2-band evi can be useful
     # evi2_arrays_list.append(evi2)
 
-    indices = {"ndwi":ndwi, "ndvi":ndvi}
+    indices = {"ndwi":ndwi}
 
     print(f"step 4 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return indices
@@ -332,12 +339,7 @@ def five_composite(index_arrays):
         if use_cuda:
             q = np.array([25., 50., 75.], dtype=np.float32)
             p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
-
-            import cupy as cp
-            stack_gpu = cp.asarray(stack)
-            mean = cp.asnumpy(cp.nanmean(stack_gpu, axis=0))
-            del stack_gpu
-            cp.get_default_memory_pool().free_all_blocks()
+            mean = data_do.gpu_nanmean(stack)
         else:
             p25, median, p75 = np.percentile(stack, [25, 50, 75], axis=0)
             mean = np.nanmean(stack, axis=0)
@@ -544,7 +546,7 @@ def lp_chunk_processing(imgs, i):
     """
     start_time = time.monotonic()
 
-    index_arrays = {"ndwi": [], "ndvi": []}
+    index_arrays = {"ndwi": []}
 
     for img in imgs:
         current_chunk = [img[band][i] for band in range(len(img))]
