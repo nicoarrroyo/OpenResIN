@@ -336,14 +336,9 @@ def five_composite(index_arrays):
         stack = np.stack(arrays_list)
 
         if use_cuda:
-            q = np.array([25., 50., 75.], dtype=np.float32) # takes <1 second
-            p25, median, p75 = data_do.gpu_nanpercentile(stack, q) # takes 6 minutes
-
-            import cupy as cp
-            stack_gpu = cp.asarray(stack) # takes <1 second
-            mean = cp.asnumpy(cp.nanmean(stack_gpu, axis=0)) # takes <1 second
-            del stack_gpu
-            cp.get_default_memory_pool().free_all_blocks() # takes <1 second
+            q = np.array([25., 50., 75.], dtype=np.float32)
+            p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
+            mean = data_do.gpu_nanmean(stack)
         else:
             p25, median, p75 = np.percentile(stack, [25, 50, 75], axis=0)
             mean = np.nanmean(stack, axis=0)

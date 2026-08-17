@@ -17,42 +17,163 @@ def get_sen2_bands(high_res):
         NIR_BAND = '8A'
     return GREEN_BAND, NIR_BAND, RED_BAND
 
-def gpu_nanpercentile(stack, q_list):
+
+# Two functions for reducing a stack of images along axis zero, ignoring NaN.
+# Processed in horizontal bands to keep peak VRAM bounded by a byte budget
+# rather than scaling with the number of scenes in the stack.
+def _band_rows(cp, n_images, height, width, vram_budget_bytes):
+    """ Helper function for GPU compositing.
+    How many image rows can be worked on at once inside a VRAM budget.
+
+    Parameters
+    ----------
+    cp : module
+        cupy
+    n_images, height, width : int
+        Variables describing the stack's shape.
+    vram_budget_bytes : int or None
+        How much a vram a band is allowed to take up. None gives half of the
+        total available memory (a bit conservative).
+
+    Returns
+    -------
+    int
+        Rows per band, at least 1 and at most the full tile height.
+    """
+    if vram_budget_bytes is None:
+        free_bytes, _ = cp.cuda.runtime.memGetInfo()
+        vram_budget_bytes = free_bytes // 2
+
+    bytes_per_row = width * (14 * n_images + 32)
+    row_budget = int(vram_budget_bytes // bytes_per_row)
+    return max(1, min(height, row_budget))
+
+def _percentiles_in_bands(cp, stack, q_list, rows_per_band):
+    """ Helper function for GPU compositing.
+    Actually calculating percentiles in a given band.
+
+    Keeping this as its own function function allows gpu_nanpercentile to
+    simply orchestrate it, and it can easily re-attempt on a row in case
+    of failure.
+
+    One band at a time: upload, count how many images have a real value for each
+    pixel, sort each pixel's observations, read the two values either side of
+    each requested percentile, interpolate between them, and download the
+    result into the output array.
+    """
+    # Theory revision for this function has been backlogged
+    n_images, height, width = stack.shape
+    out = np.empty((len(q_list), height, width), dtype=np.float32)
+
+    for y_start in range(0, height, rows_per_band):
+        y_end = min(height, y_start + rows_per_band)
+        band = cp.asarray(stack[:, y_start:y_end])
+
+        nan_mask = cp.isnan(band)
+        n_valid = n_images - nan_mask.sum(axis=0, dtype=cp.int32)
+
+        band[nan_mask] = cp.inf
+        del nan_mask
+        band = cp.sort(band, axis=0)
+
+        for k, q in enumerate(q_list):
+            float_index = (q / 100.0) * (n_valid - 1)
+            lower = cp.floor(float_index).astype(cp.int32)
+            upper = cp.minimum(lower + 1, n_valid - 1).astype(cp.int32)
+            frac = float_index - lower
+
+            lower_vals = cp.take_along_axis(band, lower[None], axis=0)[0]
+            upper_vals = cp.take_along_axis(band, upper[None], axis=0)[0]
+            interpolated = lower_vals * (1 - frac) + upper_vals * frac
+
+            # A pixel that no image observed has no percentile to report.
+            interpolated[n_valid == 0] = cp.nan
+            out[k, y_start:y_end] = cp.asnumpy(interpolated)
+
+        del band
+
+    cp.get_default_memory_pool().free_all_blocks()
+    return out
+
+def gpu_nanpercentile(stack, q_list, vram_budget_bytes=None):
+    """
+    Percentile calculation on GPU, accounts for NaN.
+
+    Parameters
+    ----------
+    stack : np.ndarray
+        (n_images, height, width) float32, NaN for masked pixels.
+    q_list : list of floats
+        Percentiles to compute, each in [0, 100].
+    vram_budget_bytes : int, optional
+        If None, taken as half of the available memory. From _band_rows above.
+
+    Returns
+    -------
+    np.ndarray
+        (len(q_list), height, width) float32.
+    """
     try:
         import cupy as cp
-        stack_gpu = cp.asarray(stack)
-        nan_mask = cp.isnan(stack_gpu)
-
-        # sort with nans pushed to end
-        stack_filled = cp.where(nan_mask, cp.inf, stack_gpu)
-        sorted_stack = cp.sort(stack_filled, axis=0)  # (n, h, w)
-        n_valid = cp.sum(~nan_mask, axis=0)  # (h, w)
-
-        h, w = stack.shape[1], stack.shape[2]
-        row_idx = cp.arange(h)[:, None]
-        col_idx = cp.arange(w)[None, :]
-
-        results = []
-        for q in q_list:
-            # linear interpolation index into sorted valid values
-            float_idx = (q / 100.0) * (n_valid - 1)
-            lo = cp.floor(float_idx).astype(cp.int32)
-            hi = cp.minimum(lo + 1, n_valid - 1)
-            frac = float_idx - lo
-
-            lo_vals = sorted_stack[lo, row_idx, col_idx]
-            hi_vals = sorted_stack[hi, row_idx, col_idx]
-            interpolated = lo_vals * (1 - frac) + hi_vals * frac
-            interpolated[n_valid == 0] = cp.nan
-            results.append(cp.asnumpy(interpolated))
-
-        del stack_gpu, sorted_stack, nan_mask, stack_filled
-        cp.get_default_memory_pool().free_all_blocks()
-        return np.array(results)  # shape: (len(q_list), h, w)
-
-    except cp.cuda.memory.OutOfMemoryError: # BUG! CP NOT REACHABLE
-        print("WARNING: insufficient VRAM, falling back to CPU")
+    except ImportError:
+        print("cupy not available, computing percentiles on the CPU (slow)")
         return np.nanpercentile(stack, q_list, axis=0)
+
+    n_images, height, width = stack.shape
+    rows_per_band = _band_rows(cp, n_images, height, width, vram_budget_bytes)
+
+    while True:
+        try:
+            return _percentiles_in_bands(cp, stack, q_list, rows_per_band)
+        except cp.cuda.memory.OutOfMemoryError:
+            # try again with fewer rows
+            cp.get_default_memory_pool().free_all_blocks()
+            if rows_per_band <= 64:
+                print("WARNING: insufficient VRAM, "
+                      "falling back to the CPU (slow)")
+                return np.nanpercentile(stack, q_list, axis=0)
+            rows_per_band //= 2
+            print("insufficient VRAM, retrying with "
+                  f"{rows_per_band} rows per band")
+
+def gpu_nanmean(stack, vram_budget_bytes=None):
+    """
+    Mean calculation on GPU, accounts for NaN.
+
+    Parameters
+    ----------
+    stack : np.ndarray
+        (n_images, height, width) float32, NaN for masked pixels.
+    vram_budget_bytes : int, optional
+        If None, taken as half of the available memory. From _band_rows above.
+
+    Returns
+    -------
+    np.ndarray
+        (height, width) float32.
+    """
+    try:
+        import cupy as cp
+    except ImportError:
+        print("cupy not available, computing the mean on the CPU")
+        return np.nanmean(stack, axis=0)
+
+    n_images, height, width = stack.shape
+    rows_per_band = _band_rows(cp, n_images, height, width, vram_budget_bytes)
+    out = np.empty((height, width), dtype=np.float32)
+
+    for y_start in range(0, height, rows_per_band):
+        y_end = min(height, y_start + rows_per_band)
+        band = cp.asarray(stack[:, y_start:y_end])
+
+        n_valid = n_images - cp.isnan(band).sum(axis=0, dtype=cp.int32)
+        total = cp.nansum(band, axis=0)
+        out[y_start:y_end] = cp.asnumpy(total / n_valid.astype(cp.float32))
+
+        del band
+
+    cp.get_default_memory_pool().free_all_blocks()
+    return out
 
 def rewrite(write_file, rows):
     """
@@ -439,4 +560,3 @@ def deduplicate_by_max_confidence(class_prediction_list):
     # For now, sorting by chunk index after de-duplication.
     return sorted(list(best_predictions_for_chunk.values()),
                   key=lambda item: item[0])
-
