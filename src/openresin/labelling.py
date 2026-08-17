@@ -330,23 +330,17 @@ def five_composite(index_arrays):
         stack = np.stack(arrays_list)
 
         if use_cuda:
-            q = np.array([25., 50., 75.], dtype=np.float32)
-            print(f"array made {dt.datetime.now().time():%H:%M:%S}")
-            p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
-            print(f"25, median, 75 calculated {dt.datetime.now().time():%H:%M:%S}")
+            q = np.array([25., 50., 75.], dtype=np.float32) # takes <1 second
+            p25, median, p75 = data_do.gpu_nanpercentile(stack, q) # takes 6 minutes
 
             import cupy as cp
-            stack_gpu = cp.asarray(stack)
-            print(f"array stacked {dt.datetime.now().time():%H:%M:%S}")
-            mean = cp.asnumpy(cp.nanmean(stack_gpu, axis=0))
-            print(f"mean calculated {dt.datetime.now().time():%H:%M:%S}")
+            stack_gpu = cp.asarray(stack) # takes <1 second
+            mean = cp.asnumpy(cp.nanmean(stack_gpu, axis=0)) # takes <1 second
             del stack_gpu
-            cp.get_default_memory_pool().free_all_blocks()
-            print(f"memory freed {dt.datetime.now().time():%H:%M:%S}")
+            cp.get_default_memory_pool().free_all_blocks() # takes <1 second
         else:
             p25, median, p75 = np.percentile(stack, [25, 50, 75], axis=0)
             mean = np.nanmean(stack, axis=0)
-            print("THIS SHOULDN'T TRIGGER")
 
         stms[index_name] = ({
             "p25"   : p25,
