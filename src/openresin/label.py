@@ -170,7 +170,7 @@ def main(argv=None):
 
         # %% 1. Create Image Arrays
     tci_array = np.empty([1,1]); tci_60_array = np.empty([1,1])
-    index_arrays = {"ndwi": [], "ndvi": []}
+    index_arrays = {"ndwi": []}
     for folder_num, folder in enumerate(folders):
         print("\n===============")
         print(f"|| IMG {folder_num+1} / {len(folders)} ||")

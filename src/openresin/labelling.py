@@ -296,7 +296,8 @@ def four_compute_indices(image_arrays):
     np.seterr(divide="ignore", invalid="ignore")
 
     ndwi = (green - nir) / (green + nir)
-    ndvi = ((nir - red) / (nir + red))
+
+    # ndvi = ((nir - red) / (nir + red))
 
     # gain factor g, aerosol resistance coefficient c1 & c2
     # evi_num = g * (nir - red)
@@ -307,7 +308,7 @@ def four_compute_indices(image_arrays):
     # evi2 = 2.4 * (nir - red) / (nir + red + 1) # 2-band evi can be useful
     # evi2_arrays_list.append(evi2)
 
-    indices = {"ndwi":ndwi, "ndvi":ndvi}
+    indices = {"ndwi":ndwi}
 
     print(f"step 4 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return indices
@@ -545,7 +546,7 @@ def lp_chunk_processing(imgs, i):
     """
     start_time = time.monotonic()
 
-    index_arrays = {"ndwi": [], "ndvi": []}
+    index_arrays = {"ndwi": []}
 
     for img in imgs:
         current_chunk = [img[band][i] for band in range(len(img))]
