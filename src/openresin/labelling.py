@@ -271,6 +271,12 @@ def three_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
         image_arrays[i] = image_arrays[i].astype(np.float32)
         image_arrays[i][combined_mask] = np.nan
 
+    # torch has to be instructed to release memory
+    # without this step, the image compositing has to operate on shared
+    # memory because torch is occupying all the gpu memory
+    import torch
+    torch.cuda.empty_cache()
+
     print(f"step 3 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return image_arrays
 
