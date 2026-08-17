@@ -24,20 +24,21 @@ def image_to_array(file_path_s):
 
     Returns
     -------
-    image_arrays : list of numpy arrays
-        A list containing some number of numpy arrays converted from images.
+    numpy array, or list of numpy arrays
+        One array per path given, in the order given.
 
     """
+    import rasterio
+
+    def read_one(file_path):
+        with rasterio.open(file_path) as src:
+            if src.count == 1:
+                return src.read(1)
+            return np.transpose(src.read(), (1, 2, 0))
+
     if not isinstance(file_path_s, list):
-        with Image.open(file_path_s) as img:
-            image_array = np.array(img)
-        return image_array
-    else:
-        image_arrays = []
-        for file_path in file_path_s:
-            with Image.open(file_path) as img:
-                image_arrays.append(np.array(img))
-        return image_arrays
+        return read_one(file_path_s)
+    return [read_one(file_path) for file_path in file_path_s]
 
 def get_image_bounds(image_metadata):
     transform = image_metadata["transform"]
