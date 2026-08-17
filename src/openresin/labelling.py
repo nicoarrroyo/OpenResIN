@@ -28,7 +28,7 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
     Parses folder naming conventions to locate the 'GRANULE' directory.
     Extracts high-resolution (10m) band images and True Colour Images (TCI),
     converting them into NumPy arrays. Low resolution is only used for
-    troubleshooting. TCI arrays are also resized to aid GUI labelling.
+    troubleshooting. A second, 60m TCI is opened for the labelling GUI tracker.
 
     Args:
         folders_path (str): The base directory containing the satellite
@@ -101,11 +101,11 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
         tci_file_name = prefix + f"_TCI_{c.RES}.jp2"
         tci_array = image_do.image_to_array(os.path.join(tci_path, tci_file_name))
 
-        tci_60_path = os.path.join(images_path, f"R{c.RES}")
-        tci_60_file_name = prefix + f"_TCI_{c.RES}.jp2"
-        with Image.open(os.path.join(tci_60_path, tci_60_file_name)) as img:
-            size = (img.width//10, img.height//10)
-            tci_60_array = np.array(img.resize(size))
+        print("opening 60m resolution true colour image")
+        tci_60_path = os.path.join(images_path, "R60m")
+        tci_60_file_name = prefix + "_TCI_60m.jp2"
+        tci_60_array = image_do.image_to_array(
+            os.path.join(tci_60_path, tci_60_file_name))
 
     print(f"step 1 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return [image_arrays,
