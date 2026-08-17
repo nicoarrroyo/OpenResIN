@@ -39,26 +39,7 @@ def pre_run_checks():
         print("STEP ONE (IMAGE ARRAY CONVERSION) WILL LIKELY FAIL")
 
     # ==== STEP TWO CHECK ====
-    two_pass        = True # known feature masking
-    try:
-        import rasterio
-        import geopandas
-        import fiona
-        del rasterio; del geopandas; del fiona;
-    except:
-        if c.KNOWN_FEATURE_MASKING:
-            i = ui_do.alert_user(
-                warning="Missing libraries (rasterio, geopandas, or fiona)",
-                consequence="Known feature masking will not work",
-                solution="",
-                n_errors=i)
-            two_pass = False
-
-    if not two_pass:
-        print("STEP 2 (KNOWN FEATURE MASKING) WILL LIKELY FAIL")
-
-    # ==== STEP THREE CHECK ====
-    three_pass      = True # cloud masking (omnicloudmask)
+    two_pass        = True # cloud masking (omnicloudmask)
 
     if c.CLOUD_MASKING and not cuda_available:
         i = ui_do.alert_user(
@@ -73,6 +54,17 @@ def pre_run_checks():
             consequence="Cloud masking will not work",
             solution="Install omnicloudmask (see GitHub)",
             n_errors=i)
+
+    if not two_pass:
+        print("STEP 2 (CLOUD MASKING) WILL LIKELY FAIL")
+
+    # ==== STEP THREE CHECK ====
+    three_pass      = True # index calculation
+    if not three_pass:
+        print("STEP 3 (INDEX CALCULATION) WILL LIKELY FAIL")
+
+    # ==== STEP FOUR CHECK ====
+    four_pass       = True # image compositing
     if c.COMPOSITING and not cupy_available:
         i = ui_do.alert_user(
             warning="COMPOSITING enabled but no cupy support found",
@@ -81,18 +73,34 @@ def pre_run_checks():
             "card with cupy library installed"),
             n_errors=i)
 
-    if not three_pass:
-        print("STEP 3 (CLOUD MASKING) WILL LIKELY FAIL")
-
-    # ==== STEP FOUR CHECK ====
-    four_pass       = True # index calculation
     if not four_pass:
-        print("STEP 4 (INDEX CALCULATION) WILL LIKELY FAIL")
+        print("STEP 4 (IMAGE COMPOSITING) WILL LIKELY FAIL")
 
     # ==== STEP FIVE CHECK ====
-    five_pass       = True # chunkification
+    five_pass       = True # known feature masking
+    try:
+        import rasterio
+        import geopandas
+        import fiona
+        del rasterio; del geopandas; del fiona;
+    except:
+        if c.KNOWN_FEATURE_MASKING:
+            i = ui_do.alert_user(
+                warning="Missing libraries (rasterio, geopandas, or fiona)",
+                consequence="Known feature masking will not work",
+                solution="",
+                n_errors=i)
+            five_pass = False
+
     if not five_pass:
-        print("STEP 5 (CHUNK SEPARATION) WILL LIKELY FAIL")
+        print("STEP 5 (KNOWN FEATURE MASKING) WILL LIKELY FAIL")
+
+    # chunk separation is part of step 7, not a step of its own. This check
+    # carried a "step 5" label that was already wrong before the renumber, so
+    # it loses the number rather than gaining a new one.
+    chunk_pass      = True # chunkification (step 7.1)
+    if not chunk_pass:
+        print("CHUNK SEPARATION (STEP 7.1) WILL LIKELY FAIL")
 
     # ==== STEP SIX CHECK ====
     six_pass        = True # data validation

@@ -53,7 +53,11 @@ def get_image_bounds(image_metadata):
     return (left, bottom, right, top)
 
 def known_feature_mask(image_array, image_metadata, data_path,
-                       feature_type, buffer_metres=None):
+                       feature_type, buffer_metres=None, fill=0):
+    """
+    "fill" is the value that masked pixels become. Default is 0 to preserve
+    uint16 band arrays. For arrays of computed indices, pass NaN directly.
+    """
     import fiona
     import geopandas as gpd
     from rasterio import features
@@ -105,11 +109,11 @@ def known_feature_mask(image_array, image_metadata, data_path,
     else:
         feature_mask = feature_mask_layer == 1
 
-    image_array[feature_mask] = 0
+    image_array[feature_mask] = fill
 
     return image_array
 
-def mask_urban_areas(image_array, image_metadata, urban_data_path):
+def mask_urban_areas(image_array, image_metadata, urban_data_path, fill=0):
     s2_bounds_tuple = get_image_bounds(image_metadata)
     import rasterio
     from rasterio.warp import Resampling, reproject
@@ -138,7 +142,7 @@ def mask_urban_areas(image_array, image_metadata, urban_data_path):
             urban_mask = (urban_data_window == 20) | (urban_data_window == 21)
 
         # Apply the mask
-        image_array[urban_mask] = 0
+        image_array[urban_mask] = fill
     return image_array
 
 def upscale_image_array(img_array, factor=2):

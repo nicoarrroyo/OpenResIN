@@ -142,55 +142,58 @@ def main(argv=None):
         if LP_MODE:
             image_arrays_list.append(image_arrays)
 
-        # %% 2. Mask Known Features
+        # moving known-feature masking from step 2 to step 5 (after composite)
+
+        # %% 2. Mask Clouds (Omnicloudmask)
         print("----------")
         print("| STEP 2 |")
         print("----------")
-        if c.KNOWN_FEATURE_MASKING:
-            image_arrays = operation.two_mask_known_feature(
-                image_arrays,
-                image_metadata)
-            if LP_MODE: # overwrite previous image arrays if features get masked
-                image_arrays_list[folder_num] = image_arrays
-        elif not c.KNOWN_FEATURE_MASKING:
-            print("skipping known feature masking")
-
-        # %% 3. Mask Clouds (Omnicloudmask)
-        print("----------")
-        print("| STEP 3 |")
-        print("----------")
         if not LP_MODE:
             if c.CLOUD_MASKING:
-                image_arrays = operation.three_mask_clouds(image_arrays)
+                image_arrays = operation.two_mask_clouds(image_arrays)
             elif not c.CLOUD_MASKING:
                 print("skipping cloud masking")
         elif LP_MODE:
             print("skipping cloud masking (done during labelling)")
 
-        # %% 4. Calculate Spectral Indices
+        # %% 3. Calculate Spectral Indices
         print("----------")
-        print("| STEP 4 |")
+        print("| STEP 3 |")
         print("----------")
         if not LP_MODE:
-            indices = operation.four_compute_indices(image_arrays)
+            indices = operation.three_compute_indices(image_arrays)
             for key in index_arrays:
                 index_arrays[key].append(indices[key])
         elif LP_MODE:
             print("skipping spectral index calculation (done during labelling)")
 
-    # %% 5. Composite Images (and plot)
+    # %% 4. Composite Images (and plot)
     print("----------")
-    print("| STEP 5 |")
+    print("| STEP 4 |")
     print("----------")
     if not LP_MODE:
         if c.COMPOSITING:
-            stms = operation.five_composite(index_arrays)
+            stms = operation.four_composite(index_arrays)
             labelling_array = stms["ndwi"]["median"] # TODO replace with full stm
         elif not c.COMPOSITING:
-            labelling_array = operation.five_mean(index_arrays)["ndwi"]
+            labelling_array = operation.four_mean(index_arrays)["ndwi"]
     elif LP_MODE:
-        labelling_array = image_arrays_list # known features get masked in LP_MODE
+        labelling_array = image_arrays_list
         print("skipping image compositing (done during labelling)")
+
+    # %% 5. Mask Known Features
+    print("----------")
+    print("| STEP 5 |")
+    print("----------")
+    if LP_MODE:
+        print("skipping known feature masking (not supported in LP MODE)")
+    elif c.KNOWN_FEATURE_MASKING:
+        # not masking other STMs for now
+        labelling_array = operation.five_mask_known_feature(
+            labelling_array,
+            image_metadata)
+    else:
+        print("skipping known feature masking")
 
     if c.SHOW_INDEX_PLOTS and not LP_MODE:
         operation.fiveb_plot(labelling_array, folders_path)
