@@ -114,112 +114,6 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
             tci_array,
             tci_60_array]
 
-# %% 5. Masking out known features
-def five_mask_known_feature(index_array, image_metadata, fill=np.nan):
-    """
-    Applies geographic masks to an image array to remove known features.
-
-    Uses shapefiles and GeoTIFFs to mask out rivers, the sea, known reservoirs,
-    and urban areas from the satellite imagery. This prevents these features
-    from causing false positives during the water body identification training.
-
-    Designed to run on a single image array. Can be a composite or just a
-    single band, but it is intended to be the composite.
-
-    Args:
-        index_array (np.ndarray): e.g. NDWI median
-        image_metadata (dict): Metadata associated with the rasterized images.
-        Can be taken from any image of a given tile.
-
-    Returns:
-        np.ndarray: The index array with known features masked out.
-    """
-    print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
-    print("masking out known features")
-
-    masking_path = os.path.join(c.DATA_DIR, "masks")
-
-    rivers_data = os.path.join(
-        masking_path,
-        "rivers",
-        "data",
-        "WatercourseLink.shp"
-        )
-    boundaries_data = os.path.join( # for masking the sea
-        masking_path,
-        "boundaries",
-        ("Regions_December_2024_Boundaries_EN_BSC_"
-        "-6948965129330885393.geojson")
-        )
-    known_reservoirs_data = os.path.join(
-        masking_path,
-        "known-reservoirs",
-        "LRR_EW_202307_v1",
-        "SHP",
-        "LRR_ENG_20230601_WGS84.shp" # WGS84 is more accurate than OSGB35
-        )
-    urban_areas_data = os.path.join( # REMEMBER TO CITE SOURCE FROM README
-        masking_path,
-        "urban-areas",
-        "CEH_GBLandCover_2024_10m",
-        "data",
-        "4dd9df19-8df5-41a0-9829-8f6114e28db1",
-        "gblcm2024_10m.tif"
-        )
-
-    try:
-        index_array = image_do.known_feature_mask(
-            index_array,
-            image_metadata,
-            rivers_data,
-            feature_type="rivers",
-            buffer_metres=20,
-            fill=fill
-            )
-    except Exception as e:
-        print(f"FAILURE: river masking (due to error: {e})")
-        print("TRYING: skip step. User must source the file.")
-        ui_do.confirm_continue_or_exit()
-    try:
-        index_array = image_do.known_feature_mask(
-            index_array,
-            image_metadata,
-            boundaries_data,
-            feature_type="sea",
-            fill=fill
-            )
-    except Exception as e:
-        print(f"FAILURE: sea masking (due to error: {e})")
-        print("TRYING: skip step. User must source the file.")
-        ui_do.confirm_continue_or_exit()
-    try:
-        index_array = image_do.known_feature_mask(
-            index_array,
-            image_metadata,
-            known_reservoirs_data,
-            feature_type="known reservoirs",
-            buffer_metres=50,
-            fill=fill
-            )
-    except Exception as e:
-        print(f"FAILURE: known reservoir masking (due to error: {e})")
-        print("TRYING: skip step. User must source the file.")
-        ui_do.confirm_continue_or_exit()
-    try:
-        index_array = image_do.mask_urban_areas( # different process (.tif)
-            index_array,
-            image_metadata,
-            urban_areas_data,
-            fill=fill
-            )
-    except Exception as e:
-        print(f"FAILURE: urban area masking (due to error: {e})")
-        print("TRYING: skip step. User must source the file.")
-        ui_do.confirm_continue_or_exit()
-
-    print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
-    return index_array
-
 # %% 2. Masking out clouds (OmniCloudMask) (iterative)
 def two_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
                       batch_size=4, inference_device="cuda",
@@ -378,6 +272,112 @@ def four_mean(index_arrays):
 
     print(f"step 4 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return mean
+
+# %% 5. Masking out known features
+def five_mask_known_feature(index_array, image_metadata, fill=np.nan):
+    """
+    Applies geographic masks to an image array to remove known features.
+
+    Uses shapefiles and GeoTIFFs to mask out rivers, the sea, known reservoirs,
+    and urban areas from the satellite imagery. This prevents these features
+    from causing false positives during the water body identification training.
+
+    Designed to run on a single image array. Can be a composite or just a
+    single band, but it is intended to be the composite.
+
+    Args:
+        index_array (np.ndarray): e.g. NDWI median
+        image_metadata (dict): Metadata associated with the rasterized images.
+        Can be taken from any image of a given tile.
+
+    Returns:
+        np.ndarray: The index array with known features masked out.
+    """
+    print(f"step 5 beginning at {dt.datetime.now().time():%H:%M:%S}")
+    print("masking out known features")
+
+    masking_path = os.path.join(c.DATA_DIR, "masks")
+
+    rivers_data = os.path.join(
+        masking_path,
+        "rivers",
+        "data",
+        "WatercourseLink.shp"
+        )
+    boundaries_data = os.path.join( # for masking the sea
+        masking_path,
+        "boundaries",
+        ("Regions_December_2024_Boundaries_EN_BSC_"
+        "-6948965129330885393.geojson")
+        )
+    known_reservoirs_data = os.path.join(
+        masking_path,
+        "known-reservoirs",
+        "LRR_EW_202307_v1",
+        "SHP",
+        "LRR_ENG_20230601_WGS84.shp" # WGS84 is more accurate than OSGB35
+        )
+    urban_areas_data = os.path.join( # REMEMBER TO CITE SOURCE FROM README
+        masking_path,
+        "urban-areas",
+        "CEH_GBLandCover_2024_10m",
+        "data",
+        "4dd9df19-8df5-41a0-9829-8f6114e28db1",
+        "gblcm2024_10m.tif"
+        )
+
+    try:
+        index_array = image_do.known_feature_mask(
+            index_array,
+            image_metadata,
+            rivers_data,
+            feature_type="rivers",
+            buffer_metres=20,
+            fill=fill
+            )
+    except Exception as e:
+        print(f"FAILURE: river masking (due to error: {e})")
+        print("TRYING: skip step. User must source the file.")
+        ui_do.confirm_continue_or_exit()
+    try:
+        index_array = image_do.known_feature_mask(
+            index_array,
+            image_metadata,
+            boundaries_data,
+            feature_type="sea",
+            fill=fill
+            )
+    except Exception as e:
+        print(f"FAILURE: sea masking (due to error: {e})")
+        print("TRYING: skip step. User must source the file.")
+        ui_do.confirm_continue_or_exit()
+    try:
+        index_array = image_do.known_feature_mask(
+            index_array,
+            image_metadata,
+            known_reservoirs_data,
+            feature_type="known reservoirs",
+            buffer_metres=50,
+            fill=fill
+            )
+    except Exception as e:
+        print(f"FAILURE: known reservoir masking (due to error: {e})")
+        print("TRYING: skip step. User must source the file.")
+        ui_do.confirm_continue_or_exit()
+    try:
+        index_array = image_do.mask_urban_areas( # different process (.tif)
+            index_array,
+            image_metadata,
+            urban_areas_data,
+            fill=fill
+            )
+    except Exception as e:
+        print(f"FAILURE: urban area masking (due to error: {e})")
+        print("TRYING: skip step. User must source the file.")
+        ui_do.confirm_continue_or_exit()
+
+    print(f"step 5 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
+    return index_array
 
 def fiveb_plot(labelling_array, folder_path):
     if c.SAVE_IMAGES:
