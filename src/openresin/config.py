@@ -26,6 +26,7 @@ SEED_LABELS_DIR = os.path.join(DATA_DIR, "seed-labels")
 OUTPUTS_DIR = os.path.join(HOME_DIR, "outputs")
 LABELS_DIR = os.path.join(OUTPUTS_DIR, "labels")
 PATCHES_DIR = os.path.join(OUTPUTS_DIR, "patches")
+PREDICTIONS_DIR = os.path.join(OUTPUTS_DIR, "predictions")
 MODELS_DIR = os.path.join(HOME_DIR, "models")
 
 # --- Constants ---

@@ -120,7 +120,8 @@ def main(argv=None):
     minichunk_header = ",minichunks,"
     chunk_header = "chunk," + ",".join(map(str, range(25)))
 
-    predictions_file_path = os.path.join(folder_path, predictions_file)
+    os.makedirs(c.PREDICTIONS_DIR, exist_ok=True)
+    predictions_file_path = os.path.join(c.PREDICTIONS_DIR, predictions_file)
 
     # %% find biggest chunk
     check_file_permission(predictions_file_path)
