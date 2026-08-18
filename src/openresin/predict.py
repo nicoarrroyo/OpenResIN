@@ -29,7 +29,6 @@ from .user_interfacing import confirm_continue_or_exit, end_spinner, start_spinn
 ####folder = ("S2C_MSIL2A_20250331T110651_N0511_R137_T30UXC_20250331T143812.SAFE")
 #folder = ("S2C_MSIL2A_20250331T110651_N0511_R137_T31UCU_20250331T143812.SAFE")
 # Shared with evaluate.py via the config
-DEFAULT_FOLDER = c.DEFAULT_FOLDER
 
 
 def build_parser():
@@ -40,11 +39,8 @@ def build_parser():
                      "already written."))
 
     parser.add_argument(
-        "--folder", default=DEFAULT_FOLDER,
+        "--folder", type=str, default=c.DEFAULT_FOLDER,
         help="the .SAFE folder under data/sat-images to predict over")
-    # Defaults to what train.py would have saved, so the two cannot drift:
-    # train writes "{MODEL_TYPE} model epochs-{EPOCHS}.keras" and this reads
-    # it back. Hardcoding 150 here is how they came to disagree.
     parser.add_argument(
         "--model-epochs", type=int, default=c.EPOCHS,
         help="epoch count in the model filename (default: %(default)s)")
@@ -71,6 +67,13 @@ def main(argv=None):
     n_chunks = 5000 # do not change!!
 
     # %% prelim
+    scene_path = os.path.join(c.DATA_DIR, "sat-images", folder)
+    if not os.path.isdir(scene_path):
+        print(f"no such scene: {scene_path}")
+        print("--folder takes the name of a .SAFE directory that exists "
+              "under data/sat-images")
+        return 1
+
     stop_event, thread = start_spinner(message="pre-run preparation")
 
     (sentinel_name, instrument_and_product_level, datatake_start_sensing_time,
