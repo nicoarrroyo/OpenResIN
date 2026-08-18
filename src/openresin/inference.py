@@ -188,6 +188,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
         ndwi = labelling.three_compute_indices(image_arrays)["ndwi"]
 
         # %%%% Compositing skipped, inference on a single tile, no step 4
+        print("step 4 skipped - no compositing on a single tile")
 
         # %%%% 4. Mask Known Features
         if c.KNOWN_FEATURE_MASKING:
@@ -195,11 +196,11 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
         else:
             print("skipping known feature masking")
 
-        # %%%% 5. Save Satellite Image Chunks
+        # %%%% 6. Save Satellite Image Chunks
         print("==========")
-        print("| STEP 5 |")
+        print("| STEP 6 |")
         print("==========")
-        # %%%% 5.1 Create Chunks
+        # %%%% 6.1 Create Chunks
         stop_event, thread = start_spinner(message=f"creating {n_chunks} "
                                            "chunks from satellite imagery")
         start_time = time.monotonic()
@@ -219,7 +220,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
 
         end_spinner(stop_event, thread)
 
-        # %%%% 5.2 Create and Save Mini-Chunks
+        # %%%% 6.2 Create and Save Mini-Chunks
         print("saving chunks as image files")
         ensure_folder(test_data_path)
 
@@ -260,17 +261,17 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
                                     dupe_check=False)
                     mc_idx += 1
         time_taken = time.monotonic() - start_time
-        print(f"step 5 complete! time taken: {time_taken:.2f} seconds")
+        print(f"step 6 complete! time taken: {time_taken:.2f} seconds")
     else:
         print("============")
-        print("| STEP 1-5 |")
+        print("| STEP 1-6 |")
         print("============")
         print("chunk generation disabled, skipping steps 1-5")
-    # %%% 6. Load and Deploy Model
+    # %%% 7. Load and Deploy Model
     print("==========")
-    print("| STEP 6 |")
+    print("| STEP 7 |")
     print("==========")
-    # %%%% 6.1 Load Essential Info & Prepare File List
+    # %%%% 7.1 Load Essential Info & Prepare File List
     print("loading model and preparing file list")
     start_time = time.monotonic()
     results_list = []
@@ -314,7 +315,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
     selected_file_names = all_file_names[start_file:(start_file+n_files)]
     del all_file_names # save memory
 
-    # %%%% 6.2 Make Predictions using Batch Processing
+    # %%%% 7.2 Make Predictions using Batch Processing
     stop_event, thread = start_spinner(message="preparing for predictions on "
                                f"{n_files} files "
                                f"({n_chunk_preds} chunks)")
@@ -369,8 +370,8 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
     end_spinner(stop_event, thread)
 
     time_taken = time.monotonic() - start_time
-    print(f"step 6 complete! time taken: {round(time_taken, 2)} seconds")
+    print(f"step 7 complete! time taken: {round(time_taken, 2)} seconds")
 
-    # %%% 7. Return
+    # %%% 8. Return
     sorted_results_list = sort_prediction_results(results_list)
     return sorted_results_list
