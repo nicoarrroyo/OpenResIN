@@ -39,8 +39,9 @@ def build_parser():
                      "already written."))
 
     parser.add_argument(
-        "--folder", type=str, default=c.DEFAULT_FOLDER,
-        help="the .SAFE folder under data/sat-images to predict over")
+        "--folder", type=str, default=None,
+        help="the .SAFE folder under data/sat-images to predict over "
+             "(default: the first one found there)")
     parser.add_argument(
         "--model-epochs", type=int, default=c.EPOCHS,
         help="epoch count in the model filename (default: %(default)s)")
@@ -59,7 +60,7 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
 
     MAIN_START_TIME = time.monotonic()
-    folder = args.folder
+    folder = args.folder or c.default_folder()
     model_epochs = args.model_epochs
     n_chunk_preds = args.n_chunk_preds
 
@@ -67,6 +68,11 @@ def main(argv=None):
     n_chunks = 5000 # do not change!!
 
     # %% prelim
+    if folder is None:
+        print("no .SAFE scene found under data/sat-images")
+        print("put a Sentinel-2 product there, or name one with --folder")
+        return 1
+
     scene_path = os.path.join(c.DATA_DIR, "sat-images", folder)
     if not os.path.isdir(scene_path):
         print(f"no such scene: {scene_path}")
