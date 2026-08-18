@@ -50,10 +50,9 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
     stop_event, thread = start_spinner(message="checking for "
                                        "pre-existing files")
     start_time = time.monotonic()
-    path = os.path.join(c.DATA_DIR, "sat-images", folder)
 
     # %%%% 0.1 Chunk Check!
-    test_data_path = os.path.join(path, "test data", f"ndwi_{max_multiplier}")
+    test_data_path = os.path.join(c.CHUNKS_DIR, folder, f"ndwi_{max_multiplier}")
     existing_files = []
     real_n_chunks = math.floor(math.sqrt(n_chunks)) ** 2 - 1
     n_mini_chunks = 25

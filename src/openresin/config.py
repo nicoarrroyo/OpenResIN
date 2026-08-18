@@ -24,6 +24,7 @@ HOME_DIR = os.path.dirname(os.path.dirname(PKG_DIR))    # repo root
 DATA_DIR = os.path.join(HOME_DIR, "data")
 SEED_LABELS_DIR = os.path.join(DATA_DIR, "seed-labels")
 OUTPUTS_DIR = os.path.join(HOME_DIR, "outputs")
+CHUNKS_DIR = os.path.join(OUTPUTS_DIR, "chunks")
 LABELS_DIR = os.path.join(OUTPUTS_DIR, "labels")
 PATCHES_DIR = os.path.join(OUTPUTS_DIR, "patches")
 PREDICTIONS_DIR = os.path.join(OUTPUTS_DIR, "predictions")
