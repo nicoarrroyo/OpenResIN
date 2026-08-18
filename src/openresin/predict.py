@@ -123,28 +123,10 @@ def main(argv=None):
         print("this image is already complete; nothing to predict")
         return 0
 
-    # %% yield expected duration of run
-    n_files = n_chunk_preds * 25
-    # duration relationship for the dell xps 9315 (personal pc)
-    duration = (0.00045 * n_files) + 6.62
-    h, m, s = convert_seconds_to_hms(1.1 * duration)
-    est_duration = datetime.timedelta(
-        hours=h,
-        minutes=m,
-        seconds=s)
-
-    time_format = "%H:%M:%S %B %d %Y"
-    start_time_obj = datetime.datetime.now(zf.ZoneInfo("Europe/Rome"))
-    est_end_time = start_time_obj + est_duration
-
-    start_str = start_time_obj.strftime(time_format)
-    est_end_str = est_end_time.strftime(time_format)
-    end_spinner(stop_event, thread)
-
-    # %% pre-run update
-    # note: these numbers are estimates for reference only
+    # %% pre-run check
     pre_completion = round(100 * biggest_chunk / real_n_chunks, 2)
     post_completion = round(100 * (biggest_chunk + n_chunk_preds) / real_n_chunks, 2)
+    end_spinner(stop_event, thread)
 
     print(f"\n=== PRE-RUN CHECK == MODEL EPOCHS {model_epochs} ===")
     print(f"COMPLETED SO FAR: {pre_completion}%")
