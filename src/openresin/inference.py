@@ -7,7 +7,6 @@ import time
 import math
 import os
 import re  # "regular expressions" for parsing filenames
-import sys
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2" # filter TF outputs
 
@@ -27,135 +26,65 @@ from .data_handling import (
 )
 from .image_handling import save_image_file
 from .misc import split_array
-from .user_interfacing import end_spinner, start_spinner
+from .user_interfacing import (
+    end_spinner,
+    start_spinner,
+    confirm_continue_or_exit
+)
 
 # %% Big guy
-def run_model(folder, n_chunks, model_name, max_multiplier,
-              start_chunk, n_chunk_preds):
+def run_model(folder, n_chunks, model_name, max_multiplier=0.41,
+              start_chunk=0, n_chunk_preds=None, rebuild_inputs=False):
 
     start_chunk = check_positive_int(
         var=start_chunk,
         description="chunk to start on")
 
-    n_chunk_preds = check_positive_int(
-        var=n_chunk_preds,
-        description="number of chunks to make predictions on")
+    if n_chunk_preds is not None:
+        n_chunk_preds = check_positive_int(
+            var=n_chunk_preds,
+            description="number of chunks to make predictions on")
 
-    n_files = n_chunk_preds * 25
-    start_file = start_chunk * 25
     # %%% 0. Check for Pre-existing Files
     print("==========")
     print("| STEP 0 |")
     print("==========")
-    stop_event, thread = start_spinner(message="checking for "
-                                       "pre-existing files")
     start_time = time.monotonic()
 
     # %%%% 0.1 Chunk Check!
-    test_data_path = os.path.join(c.CHUNKS_DIR, folder, f"ndwi_{max_multiplier}")
-    existing_files = []
+    test_data_path = os.path.join(c.CHUNKS_DIR, folder,
+                                  f"ndwi_{max_multiplier}")
     real_n_chunks = math.floor(math.sqrt(n_chunks)) ** 2 - 1
     n_mini_chunks = 25
     mc_per_len = int(np.sqrt(n_mini_chunks)) # mini-chunks per length
     # important note! ensure this matches the IMG_HEIGHT division in trainer
     # as well as the BOX_SIZE division in data_handling
+    # real_n_chunks is the highest chunk index, so a full set is one more.
+    expected_files = (real_n_chunks + 1) * n_mini_chunks
+
     generate_chunks = False
+    if rebuild_inputs or not os.path.isdir(test_data_path):
+        generate_chunks = True
+    else:
+        existing_files = [item for item in os.listdir(test_data_path)
+                          if os.path.isfile(os.path.join(test_data_path, item))]
+        if len(existing_files) < expected_files:
+            generate_chunks = True
 
-    # %%%%% 0.1.1 Extract current folder contents
-    try:
-        all_items = os.listdir(test_data_path)
-        # Filter for files only, ignore subdirectories
-        for item in all_items:
-            if os.path.isfile(os.path.join(test_data_path, item)):
-                existing_files.append(item)
-        existing_files[1] # try to access any item
-        # this will induce an intended error in the event that a directory
-        # does exist but it is unpopulated
-    except:
-        end_spinner(stop_event, thread)
-        while True:
-            print("test data directory does not exist")
-            print("WARNING: creating and saving many images may take "
-                  "very long! The console may freeze of crash, but "
-                  "progress should continue regardless")
-            print("to check progress, go to the download directory.")
-            user_input = input("do you want to recalculate NDWI and fill in "
-                               "the remaining chunks? this may add/overwrite "
-                               "files (y/n): ").strip().lower()
-            if user_input in ["y", "yes"]:
-                generate_chunks = True
-                print("starting chunk generation process")
-                # create the directory
-                ensure_folder(test_data_path)
-                break
-            elif user_input in ["n", "no"]:
-                generate_chunks = False
-                print("without chunks, the script cannot run")
-                sys.exit(0)
-                break
-            else:
-                print("Invalid input. Please enter 'y' or 'n'.")
+    if generate_chunks:
+        print(f"writing {expected_files} mini-chunk PNGs to '{test_data_path}'")
+        print("this takes a long time, and the console may look frozen while "
+              "it runs. check the output dir for progress.")
+        confirm_continue_or_exit()
+        ensure_folder(test_data_path)
+    else:
+        print(f"using {len(existing_files)} cached mini-chunk PNGs in "
+              f"'{test_data_path}'")
 
-    # Proceed only if the directory was accessible
-    if len(existing_files) > 0:
-
-        # %%%%% 0.1.2 Find latest saved chunk
-        max_chunk_index = -1
-        start_chunk_index = 0
-
-        filename_pattern = re.compile(r"ndwi chunk (\d+) minichunk \d+\.png")
-
-        for filename in existing_files:
-            match = filename_pattern.match(filename)
-            if match:
-                # Extract the captured chunk index (group 1) and convert to int
-                chunk_index = int(match.group(1))
-                max_chunk_index = max(max_chunk_index, chunk_index)
-        end_spinner(stop_event, thread)
-        print(f"Target directory contains {len(existing_files)} file(s).")
-        if max_chunk_index != -1:
-            start_chunk_index = max_chunk_index + 1
-            chunks_rem = real_n_chunks - max_chunk_index
-            percent_rem = round(100 * (chunks_rem / real_n_chunks), 2)
-            if chunks_rem > 0:
-                print(f"{max_chunk_index} chunks saved in "
-                      f"'ndwi_{max_multiplier}'.")
-                print(f"{chunks_rem} chunks remaining, "
-                      f"{percent_rem}% remaining")
-        else:
-            print("No files matching the 'ndwi chunk i minichunk j.png' "
-                  f"pattern found in 'ndwi_{max_multiplier}'.")
-            chunks_rem = real_n_chunks - max_chunk_index
-
-        # %%%%% 0.1.3 Ask user if they want to continue
-        while True:
-            if chunks_rem > 0:
-                print("WARNING: creating and saving many images may take "
-                      "very long! The console may freeze or crash, but "
-                      "progress should continue regardless")
-                print("to check progress, go to the download directory.")
-                user_input = input("do you want to recalculate NDWI and fill "
-                                   f"in the remaining {chunks_rem} chunks? "
-                                   "this may add/overwrite files "
-                                   "(y/n): ").strip().lower()
-                if user_input in ["y", "yes"]:
-                    generate_chunks = True
-                    break
-                elif user_input in ["n", "no"]:
-                    generate_chunks = False
-                    break
-                else:
-                    print("Invalid input. Please enter 'y' or 'n'.")
-            else:
-                print("disabling chunk generation")
-                generate_chunks = False
-                break
-
-    end_spinner(stop_event, thread)
     time_taken = time.monotonic() - start_time
     print(f"step 0 complete! time taken: {time_taken:.2f} seconds")
 
-    # %%% 1-5. Scene preparation like labelling does it
+    # %%% 1-6. Scene preparation like labelling does it
     if generate_chunks:
         folders_path = os.path.join(c.DATA_DIR, "sat-images")
 
@@ -190,7 +119,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
         # %%%% Compositing skipped, inference on a single tile, no step 4
         print("step 4 skipped - no compositing on a single tile")
 
-        # %%%% 4. Mask Known Features
+        # %%%% 5. Mask Known Features
         if c.KNOWN_FEATURE_MASKING:
             ndwi = labelling.five_mask_known_feature(ndwi, image_metadata)
         else:
@@ -229,8 +158,6 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
                 print("WARNING: Exceeded expected number of chunks "
                       f"({real_n_chunks}). Stopping.")
                 break
-            if not generate_chunks and i < start_chunk_index:
-                continue # Skip chunks already processed
 
             chunk_height, chunk_width = chunk.shape
             mini_chunk_h = chunk_height / mc_per_len
@@ -266,7 +193,7 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
         print("============")
         print("| STEP 1-6 |")
         print("============")
-        print("chunk generation disabled, skipping steps 1-5")
+        print("chunk generation disabled, skipping steps 1-6")
     # %%% 7. Load and Deploy Model
     print("==========")
     print("| STEP 7 |")
@@ -288,31 +215,23 @@ def run_model(folder, n_chunks, model_name, max_multiplier,
             break
 
     if not found_model:
-        print("could not find the requested model")
-        print("these are the options:")
-        for i in range(len(model_names)):
-            print(f"[{i}]: {model_names[i]}")
-        while True:
-            model_choice = input("please select the index of the"
-                              " model you would like to use: ")
-            try:
-                model_choice = int(model_choice)
-                if model_choice > len(model_names) or model_choice < 0:
-                    print("not a possible model number")
-                else:
-                    model_name = model_names[model_choice]
-                    model_path = os.path.join(c.MODELS_DIR, model_name)
-                    break
-            except Exception as e:
-                print(e)
-                print("please input an integer")
+        raise FileNotFoundError(
+            f"could not find model matching '{model_name}' in {c.MODELS_DIR}. "
+            f"Available models: {model_names}")
 
     model = keras.models.load_model(model_path)
 
     all_file_names = os.listdir(test_data_path)
     all_file_names = sort_file_names(all_file_names)
 
-    selected_file_names = all_file_names[start_file:(start_file+n_files)]
+    start_file = start_chunk * 25
+    if n_chunk_preds is not None:
+        n_files = n_chunk_preds * 25
+        selected_file_names = all_file_names[start_file:(start_file + n_files)]
+    else:
+        selected_file_names = all_file_names[start_file:]
+        n_files = len(selected_file_names)
+        n_chunk_preds = n_files // 25
     del all_file_names # save memory
 
     # %%%% 7.2 Make Predictions using Batch Processing
