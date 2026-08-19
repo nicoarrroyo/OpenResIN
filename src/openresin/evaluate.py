@@ -10,11 +10,6 @@ import numpy as np
 from . import config as c
 from .data_handling import extract_coords
 
-# The tile the recorded responses and predictions belong to. Shared with
-# predict.py via the config so the two stages chain by default; they used to
-# hold separate copies naming different scenes.
-DEFAULT_FOLDER = c.DEFAULT_FOLDER
-
 def update_counts(class_predictions, class_n, tp, tn, fp, fn):
     if class_predictions == class_n:
         tp += class_n
@@ -61,7 +56,17 @@ def get_metrics(tp, tn, fp, fn, tot_predicts):
     return acc, prec, recall, spec, f1
 
 def get_confusion_matrix(model_epochs, confidence_threshold,
-                         folder=DEFAULT_FOLDER):
+                         folder=None):
+    # The tile the recorded responses and predictions belong to. None means
+    # ask the config, which is what predict does too, so the two stages chain
+    # by default; they used to hold separate copies naming different scenes.
+    if folder is None:
+        folder = c.default_folder()
+    if folder is None:
+        raise SystemExit("no .SAFE scene found under data/sat-images; "
+                         "put a Sentinel-2 product there, or name one "
+                         "with --folder")
+
     folder_path = os.path.join(c.DATA_DIR, "sat-images", folder)
 
     tile_number_field = folder.split("_")[5] # Tile number is field 5 of .SAFE
@@ -73,7 +78,7 @@ def get_confusion_matrix(model_epochs, confidence_threshold,
 
     # predictions file
     predictions_path = os.path.join(
-        c.PREDICTIONS_DIR, f"P_5000_{model_epochs}_{tile_number_field}.csv")
+        c.PREDICTIONS_DIR, f"P_{c.N_CHUNKS}_{model_epochs}_{tile_number_field}.csv")
     with open(predictions_path, mode="r") as file:
         predictions = file.readlines()[2:len(responses)+2]
 
@@ -200,8 +205,9 @@ def build_parser():
         help="minimum confidence for a prediction to count (default: "
              "%(default)s)")
     parser.add_argument(
-        "--folder", default=DEFAULT_FOLDER,
-        help="the .SAFE folder under data/sat-images holding both files")
+        "--folder", default=None,
+        help="the .SAFE folder under data/sat-images holding both files "
+             "(default: the first one found there)")
     return parser
 
 def main(argv=None):

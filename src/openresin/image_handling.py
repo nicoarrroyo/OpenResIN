@@ -415,8 +415,10 @@ def save_image_file(data, image_name, normalise, coordinates,
     image_name : str
         Full path to write to, including the filename.
     normalise : bool
-        Apply the viridis colormap over [g_min, g_max]. False passes the data
-        through as uint8, used for TCI patches that are already 8-bit.
+        Scale the data over [g_min, g_max] into an 8-bit greyscale patch, the
+        same encoding labelling.eight_segment_data writes for training. False
+        passes the data through as uint8, used for TCI patches that are
+        already 8-bit.
     coordinates : sequence of 4 floats
         [ulx, uly, lrx, lry] in pixels, clamped to the data's bounds.
     dupe_check : bool
@@ -449,17 +451,18 @@ def save_image_file(data, image_name, normalise, coordinates,
             if cropped_data.size == 0:
                 return # Skip saving empty images
 
-            # Check for all-NaN slices after cropping
-            if np.all(np.isnan(cropped_data)):
-                # Create a black image of the expected type/channels
-                # Assuming RGBA output from cmap
-                final_data = np.zeros((*cropped_data.shape, 4), dtype=np.uint8)
+            # Greyscale, not a colormap, to match labelling output
+            clipped = np.clip(cropped_data, g_min, g_max)
+            if g_max != g_min:
+                scaled = (clipped - g_min) / (g_max - g_min) * 255
             else:
-                # Proceed with normalization and colormapping
-                norm = plt.Normalize(g_min, g_max)
-                cmap = plt.get_cmap("viridis")
-                rgba_data = cmap(norm(cropped_data))
-                final_data = (255 * rgba_data).astype(np.uint8)
+                scaled = np.zeros_like(clipped)
+            final_data = np.nan_to_num(scaled, nan=0.0).astype(np.uint8)
+
+            # NaN goes to mid-grey so masked ground stays distinguishable from
+            # a true zero, again as eight_segment_data does it. An all-NaN crop
+            # therefore comes out uniformly grey rather than black.
+            final_data[np.isnan(cropped_data)] = 128
         else:
             # Handle non-normalised data (e.g. TCI) - needs uint8 conversion
             # if not already

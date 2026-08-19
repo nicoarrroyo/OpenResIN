@@ -24,6 +24,7 @@ HOME_DIR = os.path.dirname(os.path.dirname(PKG_DIR))    # repo root
 DATA_DIR = os.path.join(HOME_DIR, "data")
 SEED_LABELS_DIR = os.path.join(DATA_DIR, "seed-labels")
 OUTPUTS_DIR = os.path.join(HOME_DIR, "outputs")
+CHUNKS_DIR = os.path.join(OUTPUTS_DIR, "chunks")
 LABELS_DIR = os.path.join(OUTPUTS_DIR, "labels")
 PATCHES_DIR = os.path.join(OUTPUTS_DIR, "patches")
 PREDICTIONS_DIR = os.path.join(OUTPUTS_DIR, "predictions")
@@ -59,6 +60,27 @@ RANDOM_SEED     = 123
 CLASS_NAMES     = ["land", "reservoirs", "sea", "water-bodies"]
 
 # -- Default tile --
-# No-flag fallback for `predict` and `evaluate`. Will be replaced with
-# an automated tile search. For now, the goal is just to get it to run.
-DEFAULT_FOLDER  = "S2C_MSIL2A_20250301T111031_N0511_R137_T31UCU_20250301T152054.SAFE"
+def default_folder():
+    """First Sentinel-2 scene under data/sat-images.
+    No-flag fallback for `predict` and `evaluate`
+
+    Returns
+    -------
+    str or None
+        Folder name, from a sorted listing so the answer does not depend on
+        the order the filesystem happens to return. None if there is no scene
+        to find; the caller reports that.
+    """
+    scenes_path = os.path.join(DATA_DIR, "sat-images")
+    try:
+        entries = sorted(os.listdir(scenes_path))
+    except FileNotFoundError:
+        return None
+    for name in entries:
+        # A product name is seven underscore-separated fields, and both
+        # callers index into them, so anything shorter is not a scene.
+        if (name.endswith(".SAFE")
+                and len(name.split("_")) == 7
+                and os.path.isdir(os.path.join(scenes_path, name))):
+            return name
+    return None
