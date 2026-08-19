@@ -78,7 +78,7 @@ def get_confusion_matrix(model_epochs, confidence_threshold,
 
     # predictions file
     predictions_path = os.path.join(
-        c.PREDICTIONS_DIR, f"P_5000_{model_epochs}_{tile_number_field}.csv")
+        c.PREDICTIONS_DIR, f"P_{c.N_CHUNKS}_{model_epochs}_{tile_number_field}.csv")
     with open(predictions_path, mode="r") as file:
         predictions = file.readlines()[2:len(responses)+2]
 
