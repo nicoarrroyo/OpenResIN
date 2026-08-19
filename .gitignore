@@ -94,9 +94,15 @@ dmypy.json
 .kdev4/
 *.kdev4
 
+# VSCode
+.vscode
+
 # Generated files / directories
 .claude
 .mcp.json
+CLAUDE.md
+AGENTS.md
+MEMORY.md
 
 # User-supplied inputs
 #   Contents are ignored, documentation is kept. data/seed-labels/ has no rule
