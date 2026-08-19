@@ -17,10 +17,10 @@ data/
 Everything the pipeline *produces* goes in `outputs/` at the repository root, not here. See the README in that directory.
 
 ## `masks`
-This folder contains several sub-folders. Each sub-folder will expect a type of file that the program will automatically search for and use for masking. For more information, visit the README file in the `masks` directory.
-- **Format**: Depends (.shp + .shx + .dbf + .prj)
-- **Naming**: Should match corresponding satellite image region
-- **Example**: `region_2024_boundaries.shp`
+This folder contains several sub-folders. Each sub-folder will expect a type of file that the program will automatically search for and use for masking. This data has to be sourced by the user. For more information, and links to the public masking data sources, visit the README file in the `masks` directory.
+- **Format**: Varies by mask. Shapefiles (`.shp`, with their `.shx`, `.dbf` and `.prj` siblings), GeoJSON (`.geojson`), and GeoTIFF (`.tif`) are all used;
+- **Naming**: Fixed. Each mask is looked up by its exact path and filename, which are listed in the `masks` README;
+- **Example**: `known-reservoirs/LRR_EW_202307_v1/SHP/LRR_ENG_20230601_WGS84.shp`.
 
 ## `seed-labels`
 This contains label data that has already been labelled by hand, and it is the one folder in `data/` whose contents are tracked by git rather than supplied by you. It serves as a public starting point: a fresh clone can produce training images straight away, without sitting through a labelling session first.
