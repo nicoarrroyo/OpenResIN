@@ -4,7 +4,7 @@ OpenResIN is a project for identifying small water reservoirs in Sentinel-2 sate
 
 Each stage of this pipeline is a console script, and each stage hands the next one files on disk. These files are all ordinary PNGs and CSVs, so you can open them and look at them at any point.
 
-> [!WARNING]
+> [!important]
 > The pipeline is not fully final; Labelling and training are relatively stable/sound. Inference and evaluation do run but are largely provisional and known to have significant methodological limitations.
 
 ## Installation
@@ -40,11 +40,10 @@ pip install -e .
 pip install torch --index-url https://download.pytorch.org/whl/cu130
 ```
 
-Pick the index matching your driver from the selector at [pytorch.org](https://pytorch.org/get-started/locally/). `cu130` is the build this project was developed against. Verify in a Python REPL with:
+Pick the index matching your driver from the selector at [pytorch.org](https://pytorch.org/get-started/locally/). `cu130` is the build this project was developed against. Verify with:
 
-```python
-import torch
-print(torch.version.cuda, torch.cuda.is_available())
+```bash
+python -c "import torch; print(torch.version.cuda, torch.cuda.is_available())"
 ```
 
 That should output `13.0 True`.
@@ -91,8 +90,9 @@ The repository ships with the code and sample seed labels. The user supplies the
 
 ### 2. Label the imagery (`openresin-label`)
 
+Do some image labelling on 3 images without any cloud masking, for example.
 ```bash
-openresin-label
+openresin-label --n-images 3 --no-cloud-masking
 ```
 
 `openresin-label` reads every `.SAFE` scene under `data/sat-images/`, masks the clouds out of each one, and composites them into a single clean image to label against. A Tkinter window then opens for you to draw bounding boxes around reservoirs, water bodies, land and sea.
@@ -103,34 +103,33 @@ Label coordinates from your own session go to `outputs/labels/`, never to the tr
 
 ### 3. Train the model (`openresin-train`)
 
+Train a model for 50 epochs and see the results, for example.
+
 ```bash
-openresin-train --epochs 50
+openresin-train --epochs 50 --show-plots
 ```
 
 `openresin-train` loads the patch tree, splits it into training and validation sets, builds the Keras model, and fits it. The model is written to `models/` as `{model type} model epochs-{epochs}.keras`. This filename is used to identify the model for inference.
 
-- `--save-model` is on by default. Pass `--no-save-model` to train without writing a file.
-- `--show-plots` draws accuracy and loss curves when training finishes. On by default.
-- `--batch-size`, `--learning-rate` and `--dropout-rate` override the config for one run.
-- The command exits non-zero if training does not complete.
-
-**`epoch_pathfinder.py` is not part of the pipeline and should not be run.** It sweeps epoch counts to find where the model stops improving, but it is not wired into any stage, has no entry point, and performs ten full training runs when executed. The shipped default of 150 epochs is a holding value, not a measured one. 50 is a reasonable number for a first run.
+There is also `epoch_pathfinder.py`, which is an experimental script, not part of the pipeline (yet). No need to run it for now.
 
 ### 4. Run predictions (`openresin-predict`): provisional
 
+Conduct inference with a 50-epoch-trained model over 2000 chunks, for example.
+
 ```bash
-openresin-predict --model-epochs 50 --n-chunk-preds 100
+openresin-predict --model-epochs 50 --n-chunk-preds 2000
 ```
 
 `openresin-predict` prepares the scene, cuts it into mini-chunk PNGs under `outputs/chunks/`, classifies them in batches, and writes one row per prediction to a CSV in `outputs/predictions/`.
 
-`--model-epochs` must match the epoch count you trained with. It defaults to the config value of 150, so a model trained with `--epochs 50` will not be found unless you say so. `--model-type` works the same way.
+The `--model-epochs` must match the epoch count you trained with. It defaults to the config value of 150, so a model trained with `--epochs 50` will not be found unless you say so. `--model-type` works the same way.
 
-- `--folder` selects which `.SAFE` scene to predict over. The default is the first one found under `data/sat-images/`.
-- `--n-chunk-preds N` predicts only the first N chunks. A full scene is 122,500 mini-chunks.
-- `--rebuild-inputs` forces the mini-chunk PNGs to be regenerated. Without it, an existing set is reused, which is what makes a repeat run fast. The first run on a scene writes all 122,500 files and asks for confirmation before it starts.
 
-**Pending redesign.** The output format, the input representation and the decision rule are all stopgaps. See *Project Status* below.
+> [!important]
+> **Pending redesign.** See *Project Status* below.
+> 
+> The output format, the input representation and the decision rule are all stopgaps.
 
 ### 5. Assess accuracy (`openresin-evaluate`): provisional
 
@@ -144,7 +143,10 @@ openresin-evaluate --model-epochs 50
 - `--confidence-threshold` sets the minimum confidence for a prediction to count. Defaults to 40.
 - `--folder` selects the scene, defaulting to the first found.
 
-**Pending redesign.** This stage is the most provisional in the pipeilne. It is kept because it is the tool that produced the figures in the original dissertation. Do not cite its output.
+> [!important] 
+> **Pending redesign.** See *Project Status* below.
+>
+> This stage is the most provisional in the pipeilne. It is kept because it is the tool that produced the figures in the original dissertation. Do not cite its output.
 
 ## Repository Structure
 
