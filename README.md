@@ -97,7 +97,7 @@ openresin-label --n-images 3 --no-cloud-masking
 
 `openresin-label` reads every `.SAFE` scene under `data/sat-images/`, masks the clouds out of each one, and composites them into a single clean image to label against. A Tkinter window then opens for you to draw bounding boxes around reservoirs, water bodies, land and sea.
 
-When you close the window, it segments the labelled regions and writes them as PNGs into `outputs/patches/<class>/`. Those patches are the training set.
+If you make a mistake or would like to return to a previous chunk, type `back` (use `back n` to go back `n` chunks). Once you've finished your labelling sessions, type `break` to take a break. The script will then segment the labelled regions and write them as PNGs into `outputs/patches/<class>/`. Those patches are the training set.
 
 Label coordinates from your own session go to `outputs/labels/`, never to the tracked seed set in `data/seed-labels/`.
 
