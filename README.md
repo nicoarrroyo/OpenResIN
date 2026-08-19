@@ -37,10 +37,13 @@ pip install -e .
 **4. Install a CUDA build of PyTorch.** Do not skip this if you have a CUDA-compatible GPU (NVIDIA). `torch` arrives as a dependency of `omnicloudmask`, and the wheel pip takes from PyPI is CPU-only: cloud masking will start, fail to find CUDA, and offer to fall back to the CPU. Fix it with this:
 
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu130
+pip uninstall -y torch torchvision
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 ```
 
-Pick the index matching your driver from the selector at [pytorch.org](https://pytorch.org/get-started/locally/). `cu130` is the build this project was developed against. Verify with:
+The uninstall is needed because if `torch` is already installed, pip reports "requirement already satisfied". `torchvision` comes along because the two are built as a pair and have to match.
+
+Pick the index matching your driver from the selector at [pytorch.org](https://pytorch.org/get-started/locally/). Run `nvidia-smi` to see which CUDA version your driver reports. `cu130` is the build this project was developed against. Verify with:
 
 ```bash
 python -c "import torch; print(torch.version.cuda, torch.cuda.is_available())"
@@ -103,10 +106,9 @@ Label coordinates from your own session go to `outputs/labels/`, never to the tr
 
 ### 3. Train the model (`openresin-train`)
 
-Train a model for 50 epochs and see the results, for example.
-
+Train a model for 50 epochs, without accuracy and loss curves plotted post-training, for example.
 ```bash
-openresin-train --epochs 50 --show-plots
+openresin-train --epochs 50 --no-show-plots
 ```
 
 `openresin-train` loads the patch tree, splits it into training and validation sets, builds the Keras model, and fits it. The model is written to `models/` as `{model type} model epochs-{epochs}.keras`. This filename is used to identify the model for inference.
@@ -116,7 +118,6 @@ There is also `epoch_pathfinder.py`, which is an experimental script, not part o
 ### 4. Run predictions (`openresin-predict`): provisional
 
 Conduct inference with a 50-epoch-trained model over 2000 chunks, for example.
-
 ```bash
 openresin-predict --model-epochs 50 --n-chunk-preds 2000
 ```
@@ -133,63 +134,58 @@ The `--model-epochs` must match the epoch count you trained with. It defaults to
 
 ### 5. Assess accuracy (`openresin-evaluate`): provisional
 
+Find performance metrics for a 50-epoch-trained model, for example.
 ```bash
 openresin-evaluate --model-epochs 50
 ```
 
-`openresin-evaluate` reads the prediction CSV, compares it against the labelled chunks in `data/seed-labels/`, and prints a confusion matrix with the derived metrics.
-
-- `--model-epochs` must match the predictions file you want scored, exactly as it does for `openresin-predict`.
-- `--confidence-threshold` sets the minimum confidence for a prediction to count. Defaults to 40.
-- `--folder` selects the scene, defaulting to the first found.
+`openresin-evaluate` reads the prediction CSV, compares it against the labelled chunks in `data/seed-labels/`, and prints a confusion matrix with the derived metrics. Its `--model-epochs` has to match the predictions file you want scored, exactly as it does for `openresin-predict`.
 
 > [!important] 
 > **Pending redesign.** See *Project Status* below.
 >
-> This stage is the most provisional in the pipeilne. It is kept because it is the tool that produced the figures in the original dissertation. Do not cite its output.
+> This stage is the most provisional in the pipeline. It is kept because it is the tool that produced the figures in the original dissertation. Do not cite its output.
 
 ## Repository Structure
 
-This repository is organised into several key directories:
+```
+OpenResIN/
+├── data/                 # Inputs supplied by the user (except seed labels).
+│   ├── masks/            # Masking layers, organised by category
+│   ├── sat-images/       # Sentinel-2 .SAFE scenes you download and extract
+│   └── seed-labels/      # Hand-labelled seed data, git-tracked, read-only
+├── models/               # Trained models. Not tracked by git, arrives empty
+├── outputs/              # Everything the pipeline generates. Not tracked by git
+│   ├── chunks/           # Mini-chunk PNGs cut for prediction, one folder per scene
+│   ├── labels/           # Label coordinates from your own labelling sessions
+│   ├── patches/          # Segmented training images, one folder per class
+│   └── predictions/      # Model predictions across a whole tile
+├── src/openresin/        # The source package
+└── tests/                # Test suite, run with `python -m pytest tests`
+```
 
-- `data/`: Inputs. Seed lables that ship with the repo. The data in `sat-images/` and `masks/` must be sourced by the user; see [`data/README.md`](data/README.md) for more information.
-	- `seed-labels/`: Public, hand-labelled seed label data. Tracked by git, and read-only as far as the pipeline is concerned.
-    	- `T31UCU-5000chunks.csv`: Labelled chunk coordinates for tile T31UCU, used as a starting point so a fresh clone can train without labelling first.
-    - `masks/`: Directory for user to organise masking files.
-        - `boundaries/`: Country boundary masks.
-        - `known-reservoirs/`: Masks for known reservoirs.
-        - `rivers/`: River masks.
-        - `terrain/`: Terrain level / gradient masks.
-        - `urban-areas/`: Urban area (cities, towns, etc.) masks.
-    - `sat-images/`: Directory for user-downloaded Sentinel-2 `.SAFE` scenes.
+Each of `data/` and `outputs/` has its own README with the detail: see [`data/README.md`](data/README.md) and [`outputs/README.md`](outputs/README.md).
 
-- `outputs/`: Everything the pipeline generates. Not tracked by git, arrives empty on a fresh clone.
-    - `labels/`: Label coordinates from your own labelling sessions, kept separate from the tracked seed set.
-    - `patches/`: Segmented training images, one subdirectory per class.
-    - `chunks/`: Mini-chunk PNGs cut for prediction, one subdirectory per scene.
-    - `predictions/`: Model predictions across a whole tile.
+### The source package
 
-- `models/`: Trained models. Not tracked by git, arrives empty.
+```
+src/openresin/
+├── label.py              # openresin-label. Orchestrates the labelling stage
+├── labelling.py          # The labelling steps that label.py orchestrates
+├── train.py              # openresin-train. Orchestrates training
+├── modelling.py          # Dataset loading, model building, training, and saving
+├── predict.py            # openresin-predict. Runs predictions over a whole tile
+├── inference.py          # The core prediction logic that predict.py drives
+├── evaluate.py           # openresin-evaluate. Confusion matrix and metrics
+├── config.py             # Settings and path anchors for every stage
+├── data_handling.py      # Loading, preprocessing and managing data
+├── image_handling.py     # Image manipulation and processing
+├── user_interfacing.py   # Prompts, warnings and progress reporting
+├── misc.py               # Miscellaneous utilities
+└── epoch_pathfinder.py   # Experimental epoch sweep. Not part of the pipeline
+```
 
-- `src/openresin/`: The source package.
-    - `label.py` (`openresin-label`): Orchestrates the labelling stage.
-    - `labelling.py`: The eight labelling steps that `label.py` orchestrates.
-    - `train.py` (`openresin-train`): Orchestrates training.
-    - `modelling.py`: Dataset loading, model building, training and saving.
-    - `predict.py` (`openresin-predict`): Runs predictions over a whole tile.
-    - `inference.py`: The core prediction logic that `predict.py` drives.
-    - `evaluate.py` (`openresin-evaluate`): Confusion matrix and metrics.
-    - `config.py`: Settings and path anchors for every stage.
-    - `data_handling.py`: Loading, preprocessing and managing data.
-    - `image_handling.py`: Image manipulation and processing.
-    - `user_interfacing.py`: Prompts, warnings and progress reporting.
-    - `misc.py`: Miscellaneous utilities.
-    - `epoch_pathfinder.py`: Epoch sweep helper. Not part of the pipeline; see the note under *Train the model*.
-
-- `tests/`: Test suite. Run with `python -m pytest tests`.
-    - `test_config.py`: Checks the config path anchors survive a changed working directory.
-    - `test_imports.py`: Checks every module imports without side effects and that each stage exposes a `main()`.
-    - More tests for the labelling and training stages are planned.
+The test suite is deliberately thin. `test_config.py` checks the path anchors survive a changed working directory and that the shipped settings have not been scaled down; `test_imports.py` checks every module imports without side effects and that each stage exposes a `main()`. Tests for the labelling and training stages are planned.
 
 ## Project Status and Current Limitations
 
