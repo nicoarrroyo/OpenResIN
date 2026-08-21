@@ -116,9 +116,10 @@ def one_create_image_arrays(folders_path, folder, tci_60_array):
 
 # %% 2. Masking out clouds (OmniCloudMask) (iterative)
 def two_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
-                      batch_size=4, inference_device="cuda",
-                      inference_dtype="bf16", LP_MODE=False):
+                      batch_size=4, inference_device=None,
+                      inference_dtype=None, LP_MODE=False):
 
+    import torch
     from omnicloudmask import predict_from_array
     if not c.HIGH_RES and not LP_MODE:
         print("WARNING: high-resolution setting is disabled. "
@@ -127,6 +128,16 @@ def two_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
 
     print(f"step 2 beginning at {dt.datetime.now().time():%H:%M:%S}")
     print("masking clouds")
+
+    # pick the device once instead of always attempting CUDA first: on a
+    # CPU-only machine every failed CUDA init is wasted time. bf16 has no
+    # fast path on most laptop CPUs, so CPU inference runs in float32.
+    cuda_available = torch.cuda.is_available()
+    if inference_device is None:
+        inference_device = "cuda" if cuda_available else "cpu"
+    if inference_dtype is None:
+        inference_dtype = "bf16" if inference_device == "cuda" else "float32"
+
     input_array = np.stack(
         (
         image_arrays[2], # red
@@ -158,7 +169,8 @@ def two_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
             ui_do.confirm_continue_or_exit()
         pred_mask_2d = predict_from_array(
             input_array,
-            inference_device="cpu"
+            inference_device="cpu",
+            inference_dtype="float32"
             )[0]
 
     combined_mask = (
@@ -175,8 +187,8 @@ def two_mask_clouds(image_arrays, patch_size=1000, patch_overlap=300,
     # torch has to be instructed to release memory
     # without this step, the image compositing has to operate on shared
     # memory because torch is occupying all the gpu memory
-    import torch
-    torch.cuda.empty_cache()
+    if cuda_available:
+        torch.cuda.empty_cache()
 
     print(f"step 2 complete! finished at {dt.datetime.now().time():%H:%M:%S}")
     return image_arrays
@@ -242,8 +254,9 @@ def four_composite(index_arrays):
             p25, median, p75 = data_do.gpu_nanpercentile(stack, q)
             mean = data_do.gpu_nanmean(stack)
         else:
-            p25, median, p75 = np.percentile(stack, [25, 50, 75], axis=0)
-            mean = np.nanmean(stack, axis=0)
+            q = np.array([25., 50., 75.], dtype=np.float32)
+            p25, median, p75 = data_do.cpu_nanpercentile(stack, q)
+            mean = data_do.cpu_nanmean(stack)
 
         stms[index_name] = ({
             "p25"   : p25,
@@ -563,8 +576,6 @@ def lp_chunk_processing(imgs, i):
             patch_size=75,
             patch_overlap=64,
             batch_size=4,
-            inference_device="cuda", # might as well attempt
-            inference_dtype="float32",
             LP_MODE=True)
         print("cloud masking complete")
 

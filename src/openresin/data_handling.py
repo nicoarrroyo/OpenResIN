@@ -95,6 +95,77 @@ def _percentiles_in_bands(cp, stack, q_list, rows_per_band):
     cp.get_default_memory_pool().free_all_blocks()
     return out
 
+def _band_rows_cpu(n_images, height, width, budget_bytes):
+    """ Rows per band for CPU compositing inside a RAM budget.
+
+    Same idea as _band_rows above, but for system memory. None gives a
+    conservative 1 GiB working set, which suits a laptop alongside
+    everything else it is running.
+    """
+    if budget_bytes is None:
+        budget_bytes = 1 << 30
+    # worst case per row: a float64 sorted copy of the band plus masks
+    bytes_per_row = width * (10 * n_images + 24)
+    return max(1, min(height, int(budget_bytes // bytes_per_row)))
+
+def cpu_nanpercentile(stack, q_list, budget_bytes=None):
+    """
+    Percentile calculation on CPU, accounts for NaN, processed in horizontal
+    bands so peak RAM stays bounded rather than scaling with stack size.
+
+    Parameters
+    ----------
+    stack : np.ndarray
+        (n_images, height, width) float32, NaN for masked pixels.
+    q_list : list of floats
+        Percentiles to compute, each in [0, 100].
+    budget_bytes : int, optional
+        Working-set budget per band. None gives 1 GiB.
+
+    Returns
+    -------
+    np.ndarray
+        (len(q_list), height, width) float32.
+    """
+    n_images, height, width = stack.shape
+    rows_per_band = _band_rows_cpu(n_images, height, width, budget_bytes)
+    out = np.empty((len(q_list), height, width), dtype=np.float32)
+
+    for y_start in range(0, height, rows_per_band):
+        y_end = min(height, y_start + rows_per_band)
+        out[:, y_start:y_end] = np.nanpercentile(
+            stack[:, y_start:y_end], q_list, axis=0).astype(np.float32)
+
+    return out
+
+def cpu_nanmean(stack, budget_bytes=None):
+    """
+    Mean calculation on CPU, accounts for NaN, processed in horizontal bands
+    so peak RAM stays bounded rather than scaling with stack size.
+
+    Parameters
+    ----------
+    stack : np.ndarray
+        (n_images, height, width) float32, NaN for masked pixels.
+    budget_bytes : int, optional
+        Working-set budget per band. None gives 1 GiB.
+
+    Returns
+    -------
+    np.ndarray
+        (height, width) float32.
+    """
+    _, height, width = stack.shape
+    rows_per_band = _band_rows_cpu(*stack.shape, budget_bytes)
+    out = np.empty((height, width), dtype=np.float32)
+
+    for y_start in range(0, height, rows_per_band):
+        y_end = min(height, y_start + rows_per_band)
+        out[y_start:y_end] = np.nanmean(
+            stack[:, y_start:y_end], axis=0).astype(np.float32)
+
+    return out
+
 def gpu_nanpercentile(stack, q_list, vram_budget_bytes=None):
     """
     Percentile calculation on GPU, accounts for NaN.
@@ -117,7 +188,7 @@ def gpu_nanpercentile(stack, q_list, vram_budget_bytes=None):
         import cupy as cp
     except ImportError:
         print("cupy not available, computing percentiles on the CPU (slow)")
-        return np.nanpercentile(stack, q_list, axis=0)
+        return cpu_nanpercentile(stack, q_list)
 
     n_images, height, width = stack.shape
     rows_per_band = _band_rows(cp, n_images, height, width, vram_budget_bytes)
@@ -131,7 +202,7 @@ def gpu_nanpercentile(stack, q_list, vram_budget_bytes=None):
             if rows_per_band <= 64:
                 print("WARNING: insufficient VRAM, "
                       "falling back to the CPU (slow)")
-                return np.nanpercentile(stack, q_list, axis=0)
+                return cpu_nanpercentile(stack, q_list)
             rows_per_band //= 2
             print("insufficient VRAM, retrying with "
                   f"{rows_per_band} rows per band")
@@ -156,7 +227,7 @@ def gpu_nanmean(stack, vram_budget_bytes=None):
         import cupy as cp
     except ImportError:
         print("cupy not available, computing the mean on the CPU")
-        return np.nanmean(stack, axis=0)
+        return cpu_nanmean(stack)
 
     n_images, height, width = stack.shape
     rows_per_band = _band_rows(cp, n_images, height, width, vram_budget_bytes)
