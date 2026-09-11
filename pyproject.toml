@@ -35,6 +35,7 @@ openresin-label		= "openresin.label:main"
 openresin-train		= "openresin.train:main"
 openresin-predict	= "openresin.predict:main"
 openresin-evaluate	= "openresin.evaluate:main"
+openresin-label-sw	= "openresin.label_sw:main"
 
 [dependency-groups]
 dev = [

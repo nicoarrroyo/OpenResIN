@@ -17,6 +17,7 @@ IMPORTABLE = [
     "image_handling",
     "inference",
     "label",
+    "label_sw",
     "misc",
     "modelling",
     "predict",
@@ -26,7 +27,7 @@ IMPORTABLE = [
 
 # The stages pyproject.toml promises as console scripts. Each must expose a
 # main() for `pip install -e .` to generate a working launcher.
-STAGES = ["label", "train", "predict", "evaluate"]
+STAGES = ["label", "train", "predict", "evaluate", "label_sw"]
 
 
 def _parse_all():
