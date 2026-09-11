@@ -32,7 +32,7 @@ Activate it with `.\.venv\Scripts\Activate.ps1` on Windows PowerShell, or `sourc
 pip install -e .
 ```
 
-`tkinter` may need to be installed manually on Linux.
+`tkinter` may need to be installed manually on Linux through your package manager.
 
 **4. Install a CUDA build of PyTorch.** Do not skip this if you have a CUDA-compatible GPU (NVIDIA). `torch` arrives as a dependency of `omnicloudmask`, and the wheel pip takes from PyPI is CPU-only: cloud masking will start, fail to find CUDA, and offer to fall back to the CPU. Fix it with this:
 
