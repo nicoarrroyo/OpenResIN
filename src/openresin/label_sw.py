@@ -1,5 +1,4 @@
-"""Water/non-water labelling for the surface-water classifier (V1).
-"""
+"""Run the V1 surface-water feature and polygon-labelling workflow."""
 
 import argparse
 import glob
@@ -16,14 +15,9 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="openresin-label-sw",
         description=("Build monthly water/non-water features and draw "
-                      "label polygons. Usual order: run once with no area "
-                      "flags to build features, inspect the overview "
-                      "preview, draw polygons with --annotate CELL in each "
-                      "of the six chosen cells, then freeze the split. "
-                      "Training and test areas must not neighbour each "
-                      "other (not even diagonally): a grid boundary does "
-                      "not establish independence, so adjacent "
-                      "opposite-split cells are rejected."))
+                     "label polygons. Usual order: build the features, "
+                     "inspect the overview, annotate the six chosen cells, "
+                     "then freeze their training/test split."))
 
     parser.add_argument(
         "--month", default="2026-04",
@@ -37,282 +31,396 @@ def build_parser():
         help="OmniCloudMask inference device (default: %(default)s)")
     parser.add_argument(
         "--train-areas", type=int, nargs=4, default=None, metavar="CELL",
-        help="four training area IDs (1-484); needs --test-areas, and no "
-             "training cell may neighbour a test cell, not even "
-             "diagonally (default: %(default)s)")
+        help="four training area IDs (1-484); requires --test-areas")
     parser.add_argument(
         "--test-areas", type=int, nargs=2, default=None, metavar="CELL",
-        help="two test area IDs (1-484); must not neighbour any training "
-             "cell (default: %(default)s)")
+        help="two test area IDs (1-484); cannot touch training cells, "
+             "including diagonally")
     parser.add_argument(
         "--annotate", type=int, default=None, metavar="CELL",
-        help="open the annotation window for this area ID; works on any "
-             "cell without freezing first, and resumes saved polygons")
+        help="open one area, including any polygons already saved there")
 
     return parser
 
 
-def _month_stamp(scene_dir):
+# %% Shared helpers
+def _scene_month(scene_dir):
     return os.path.basename(scene_dir).split("_")[2][:6]
 
 
-def _first_match(patterns):
+def _scene_date(scene_dir):
+    return os.path.basename(scene_dir).split("_")[2][:8]
+
+
+def _scene_tile(scene_dir):
+    return os.path.basename(scene_dir).split("_")[5]
+
+
+def _find_first_file(patterns):
     for pattern in patterns:
-        found = sorted(glob.glob(pattern))
-        if found:
-            return found[0]
+        matching_files = sorted(glob.glob(pattern))
+        if matching_files:
+            return matching_files[0]
     return None
 
 
-def _save_grid_png(composite, meta10, meta60, path):
-    """Overview composite with the fixed numbered grid overlaid, the
-    image the annotator picks areas from."""
+def _print_step(number, title):
+    print("----------")
+    print(f"| STEP {number} | {title}")
+    print("----------")
+
+
+# %% 1. Build the navigation overview
+def _save_grid_preview(composite, metadata_10m, metadata_60m, path):
+    """Save the overview composite with its numbered grid."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
 
-    shown = np.nan_to_num(np.transpose(composite, (1, 2, 0)),
-                          nan=255).astype(np.uint8)
+    display_image = np.nan_to_num(
+        np.transpose(composite, (1, 2, 0)), nan=255).astype(np.uint8)
     n_cells = c.SW_GRID_ROWS * c.SW_GRID_COLS
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.imshow(shown)
+
+    figure, axis = plt.subplots(figsize=(10, 10))
+    axis.imshow(display_image)
     for cell_id in range(1, n_cells + 1):
-        row0, row1, col0, col1 = sw.cell_to_display(meta10, meta60, cell_id)
-        ax.add_patch(patches.Rectangle(
-            (col0, row0), col1 - col0, row1 - row0,
-            linewidth=0.4, edgecolor="yellow", facecolor="none"))
-        ax.text((col0 + col1) / 2, (row0 + row1) / 2, str(cell_id),
-                color="yellow", fontsize=4, ha="center", va="center")
-    ax.set_title("Masked TCI median with fixed numbered grid")
-    ax.axis("off")
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
+        row_start, row_end, col_start, col_end = sw.cell_to_display(
+            metadata_10m, metadata_60m, cell_id)
+        axis.add_patch(patches.Rectangle(
+            (col_start, row_start),
+            col_end - col_start,
+            row_end - row_start,
+            linewidth=0.4,
+            edgecolor="yellow",
+            facecolor="none"))
+        axis.text(
+            (col_start + col_end) / 2,
+            (row_start + row_end) / 2,
+            str(cell_id),
+            color="yellow",
+            fontsize=4,
+            ha="center",
+            va="center")
+
+    axis.set_title("Masked TCI median with fixed numbered grid")
+    axis.axis("off")
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
 
 
-def _overview(out_dir, scenes, device):
-    """Step 1: 60 m navigation composite, rebuilt only when inputs or
-    settings changed since the cached run. Only the preview image and
-    the provenance are kept; the composite array itself is recomputed
-    when needed and never stored."""
-    cache_dir = os.path.join(out_dir, "overview")
-    os.makedirs(cache_dir, exist_ok=True)
-    provenance_path = os.path.join(cache_dir, "provenance.json")
-    preview_path = os.path.join(cache_dir, "composite-grid.png")
+def _create_navigation_overview(out_dir, scenes, device):
+    """Build the 60 m navigation preview unless its cache is current."""
+    overview_dir = os.path.join(out_dir, "overview")
+    provenance_path = os.path.join(overview_dir, "provenance.json")
+    preview_path = os.path.join(overview_dir, "composite-grid.png")
+    os.makedirs(overview_dir, exist_ok=True)
 
-    print("----------")
-    print("| STEP 1 | navigation overview")
-    print("----------")
-    fresh = sw.build_provenance(scenes, "overview", device)
+    _print_step(1, "navigation overview")
+
+    current_provenance = sw.build_provenance(scenes, "overview", device)
     if os.path.isfile(provenance_path) and os.path.isfile(preview_path):
         with open(provenance_path, encoding="utf-8") as handle:
-            if json.load(handle) == fresh:
-                print("  overview matches inputs and settings; reusing it")
-                return
+            saved_provenance = json.load(handle)
+        if saved_provenance == current_provenance:
+            print("  overview matches inputs and settings; reusing it")
+            return
 
-    masked_by_date = {}
-    meta10 = meta60 = None
-    for scene in scenes:
-        date = os.path.basename(scene).split("_")[2][:8]
-        one = sw.read_scene_60m(scene)
-        mask = sw.predict_cloud_mask(
-            one["red"], one["green"], one["nir"],
+    masked_tci_by_date = {}
+    metadata_10m = None
+    metadata_60m = None
+
+    for scene_dir in scenes:
+        date = _scene_date(scene_dir)
+        scene = sw.read_scene_60m(scene_dir)
+        cloud_mask = sw.predict_cloud_mask(
+            scene["red"],
+            scene["green"],
+            scene["nir"],
             inference_device=device)
-        masked_by_date.setdefault(date, []).append(sw.mask_invalid(
-            one["tci"], mask, (one["red"], one["green"], one["nir"])))
-        meta10, meta60 = one["meta10"], one["meta"]
+        masked_tci = sw.mask_invalid(
+            scene["tci"],
+            cloud_mask,
+            (scene["red"], scene["green"], scene["nir"]))
+        masked_tci_by_date.setdefault(date, []).append(masked_tci)
+        metadata_10m = scene["meta10"]
+        metadata_60m = scene["meta"]
 
-    composite, _ = sw.composite_scenes(masked_by_date)
-    _save_grid_png(composite, meta10, meta60, preview_path)
+    composite, _ = sw.composite_scenes(masked_tci_by_date)
+    _save_grid_preview(composite, metadata_10m, metadata_60m, preview_path)
+
     with open(provenance_path, "w", encoding="utf-8") as handle:
-        json.dump(fresh, handle, indent=2)
+        json.dump(current_provenance, handle, indent=2)
     print(f"  wrote {preview_path}")
 
 
-def _features(out_dir, scenes, device, month):
-    """Steps 2-5: 10 m bands and cloud masking, indices, monthly median
-    and sea/urban masking."""
-    dated = {}
-    meta = None
-    for scene in scenes:
-        date = os.path.basename(scene).split("_")[2][:8]
-        print("----------")
-        print("| STEP 2 | scene bands and cloud masking")
-        print("----------")
-        one = sw.read_scene_10m(scene)
-        mask = sw.predict_cloud_mask(
-            one["red"], one["green"], one["nir"],
-            inference_device=device)
-        bands = sw.mask_scene_bands(one, mask)
-        print("----------")
-        print("| STEP 3 | water indices")
-        print("----------")
-        print(f"  indices for {os.path.basename(scene)[:22]}")
-        indices = sw.scene_indices(bands)
-        dated.setdefault(date, []).append(
-            {"B02": bands["blue"], "B03": bands["green"],
-             "B04": bands["red"], "B08": bands["nir"], **indices})
-        meta = one["meta"]
-        del one
-
-    print("----------")
-    print("| STEP 4 | monthly median features")
-    print("----------")
-    features, valid_count = sw.monthly_features(dated)
-    del dated
-
-    print("----------")
-    print("| STEP 5 | sea and urban masking")
-    print("----------")
-    print("  rivers and known reservoirs stay: they are valid water")
+# %% 2-5. Build the monthly classifier features
+def _find_known_feature_masks():
     masks_dir = os.path.join(c.DATA_DIR, "masks")
-    boundaries = _first_match([
+    boundaries_path = _find_first_file([
         os.path.join(masks_dir, "boundaries", "*.shp"),
         os.path.join(masks_dir, "boundaries", "*.gpkg"),
-        os.path.join(masks_dir, "boundaries", "*.geojson")])
-    urban = _first_match([
+        os.path.join(masks_dir, "boundaries", "*.geojson"),
+    ])
+    urban_path = _find_first_file([
         os.path.join(masks_dir, "urban-areas", "*.tif"),
         os.path.join(masks_dir, "urban-areas", "*.tiff"),
-        os.path.join(masks_dir, "urban-areas", "*.jp2")])
-    sw.mask_known_features(features, meta, boundaries, urban)
+        os.path.join(masks_dir, "urban-areas", "*.jp2"),
+    ])
+    return boundaries_path, urban_path
+
+
+def _create_monthly_features(out_dir, scenes, device, month):
+    """Build and save the six 10 m features for one month."""
+    features_by_date = {}
+    image_metadata = None
+
+    for scene_dir in scenes:
+        _print_step(2, "scene bands and cloud masking")
+
+        scene = sw.read_scene_10m(scene_dir)
+        cloud_mask = sw.predict_cloud_mask(
+            scene["red"],
+            scene["green"],
+            scene["nir"],
+            inference_device=device)
+        masked_bands = sw.mask_scene_bands(scene, cloud_mask)
+
+        _print_step(3, "water indices")
+        print(f"  indices for {os.path.basename(scene_dir)[:22]}")
+        indices = sw.scene_indices(masked_bands)
+
+        scene_features = {
+            "B02": masked_bands["blue"],
+            "B03": masked_bands["green"],
+            "B04": masked_bands["red"],
+            "B08": masked_bands["nir"],
+            **indices,
+        }
+        date = _scene_date(scene_dir)
+        features_by_date.setdefault(date, []).append(scene_features)
+        image_metadata = scene["meta"]
+        del scene
+
+    _print_step(4, "monthly median features")
+    features, valid_count = sw.monthly_features(features_by_date)
+    del features_by_date
+
+    _print_step(5, "sea and urban masking")
+    print("  rivers and known reservoirs stay: they are valid water")
+    boundaries_path, urban_path = _find_known_feature_masks()
+    sw.mask_known_features(
+        features, image_metadata, boundaries_path, urban_path)
 
     os.makedirs(out_dir, exist_ok=True)
-    np.savez_compressed(os.path.join(out_dir, "features.npz"),
-                        valid_count=valid_count, **features)
+    features_path = os.path.join(out_dir, "features.npz")
+    np.savez_compressed(
+        features_path, valid_count=valid_count, **features)
+
     provenance = {
-        "tile": os.path.basename(scenes[0]).split("_")[5],
+        "tile": _scene_tile(scenes[0]),
         "month": month,
         "source_scenes": sorted(os.path.basename(s) for s in scenes),
         "feature_order": list(c.SW_FEATURES),
         "aggregation": "valid median within date, then median across dates",
-        "masks": {"cloud_shadow_classes": list(c.SW_CLOUD_SHADOW_CLASSES),
-                  "nodata_value": c.SW_NODATA_VALUE,
-                  "sea_source": boundaries,
-                  "urban_source": urban},
-        "crs": str(meta["crs"]),
+        "masks": {
+            "cloud_shadow_classes": list(c.SW_CLOUD_SHADOW_CLASSES),
+            "nodata_value": c.SW_NODATA_VALUE,
+            "sea_source": boundaries_path,
+            "urban_source": urban_path,
+        },
+        "crs": str(image_metadata["crs"]),
     }
-    with open(os.path.join(out_dir, "features-provenance.json"), "w",
-              encoding="utf-8") as handle:
+    provenance_path = os.path.join(out_dir, "features-provenance.json")
+    with open(provenance_path, "w", encoding="utf-8") as handle:
         json.dump(provenance, handle, indent=2)
-    valid_frac = 100 * float((valid_count > 0).mean())
+
+    valid_fraction = 100 * float((valid_count > 0).mean())
     print(f"  monthly features valid on at least one date: "
-          f"{valid_frac:.2f}%")
-    return meta
+          f"{valid_fraction:.2f}%")
+    return image_metadata
 
 
-def _annotate(out_dir, scenes, area_id):
-    """Draw polygons in one grid cell, resumable.
-
-    Needs no frozen split: the cell window comes straight from the
-    grid, and the split is looked up from areas.json when it exists
-    ("unassigned" otherwise, refreshed on the next save after
-    freezing)."""
-    window = sw.grid_cell_window(area_id)  # also rejects bad IDs
-    row0, _, col0, _ = window
-
+# %% 6. Freeze the training and test areas
+def _freeze_area_split(out_dir, tile, assignment):
+    _print_step(6, "freezing areas")
     areas_path = os.path.join(out_dir, "areas.json")
-    split = "unassigned"
-    tile = os.path.basename(scenes[0]).split("_")[5]
-    if os.path.isfile(areas_path):
-        areas = sw.load_areas(areas_path)
-        tile = areas["tile"]
-        match = [a for a in areas["areas"] if a["id"] == area_id]
-        if match:
-            split = match[0]["split"]
+    os.makedirs(out_dir, exist_ok=True)
+    sw.freeze_areas(areas_path, tile, assignment)
+    print(f"  froze {assignment} to {areas_path}")
 
-    date_chips = {}
-    for scene in scenes:
-        date = os.path.basename(scene).split("_")[2][:8]
-        chip = sw.read_tci_window(scene, window).astype(np.float32)
-        date_chips.setdefault(date, []).append(chip)
+
+def _lookup_area_tile_and_split(out_dir, area_id, default_tile):
+    """Return the saved tile and split for one area, if assigned."""
+    areas_path = os.path.join(out_dir, "areas.json")
+    if not os.path.isfile(areas_path):
+        return default_tile, "unassigned"
+
+    saved_areas = sw.load_areas(areas_path)
+    for area in saved_areas["areas"]:
+        if area["id"] == area_id:
+            return saved_areas["tile"], area["split"]
+    return saved_areas["tile"], "unassigned"
+
+
+# %% 7. Annotate one area
+def _prepare_annotation_chips(scenes, window):
+    """Prepare a composite and one TCI chip per acquisition date."""
+    chips_by_date = {}
+    for scene_dir in scenes:
+        date = _scene_date(scene_dir)
+        chip = sw.read_tci_window(scene_dir, window).astype(np.float32)
+        chips_by_date.setdefault(date, []).append(chip)
+
+    median_chips_by_date = {}
     with np.errstate(invalid="ignore"):
-        chips = {"composite": np.nanmedian(
-            np.stack([np.nanmedian(np.stack(arrs, axis=0), axis=0)
-                      for arrs in date_chips.values()], axis=0), axis=0)}
-    for date, arrs in date_chips.items():
-        chips[date] = arrs[0] if len(arrs) == 1 else np.nanmedian(
-            np.stack(arrs, axis=0), axis=0)
-    chips = {key: np.nan_to_num(arr, nan=0).astype(np.uint8)
-             for key, arr in chips.items()}
+        for date, date_chips in chips_by_date.items():
+            if len(date_chips) == 1:
+                median_chips_by_date[date] = date_chips[0]
+            else:
+                stacked_chips = np.stack(date_chips, axis=0)
+                median_chips_by_date[date] = np.nanmedian(
+                    stacked_chips, axis=0)
 
+        all_dates = np.stack(list(median_chips_by_date.values()), axis=0)
+        composite = np.nanmedian(all_dates, axis=0)
+
+    display_chips = {"composite": composite}
+    display_chips.update(median_chips_by_date)
+    for name, chip in display_chips.items():
+        display_chips[name] = np.nan_to_num(
+            chip, nan=0).astype(np.uint8)
+    return display_chips
+
+
+def _load_saved_polygons(path, row_offset, col_offset):
+    """Load scene coordinates and convert them to area coordinates."""
+    if not os.path.isfile(path):
+        return []
+
+    with open(path, encoding="utf-8") as handle:
+        saved = json.load(handle)
+
+    area_polygons = []
+    for polygon in saved["polygons"]:
+        area_vertices = []
+        for scene_x, scene_y in polygon["vertices_scene"]:
+            area_vertices.append([
+                scene_x - col_offset,
+                scene_y - row_offset,
+            ])
+        area_polygons.append({
+            "class": polygon["class"],
+            "vertices": area_vertices,
+        })
+    return area_polygons
+
+
+def _move_polygons_to_scene(polygons, row_offset, col_offset):
+    """Convert polygon vertices from area coordinates to scene coordinates."""
+    scene_polygons = []
+    for polygon in polygons:
+        scene_vertices = []
+        for area_x, area_y in polygon["vertices"]:
+            scene_vertices.append([
+                area_x + col_offset,
+                area_y + row_offset,
+            ])
+        scene_polygons.append({
+            "class": polygon["class"],
+            "vertices_scene": scene_vertices,
+        })
+    return scene_polygons
+
+
+def _annotate_grid_area(out_dir, scenes, area_id):
+    """Open one grid area and append newly drawn polygons to its file."""
+    window = sw.grid_cell_window(area_id)
+    row_start, _, col_start, _ = window
+    default_tile = _scene_tile(scenes[0])
+    tile, split = _lookup_area_tile_and_split(
+        out_dir, area_id, default_tile)
+
+    display_chips = _prepare_annotation_chips(scenes, window)
     polygons_path = os.path.join(out_dir, f"area-{area_id:03d}.json")
-    existing = []
-    if os.path.isfile(polygons_path):
-        with open(polygons_path, encoding="utf-8") as handle:
-            saved = json.load(handle)
-        existing = [{"class": p["class"],
-                     "vertices": [[x - col0, y - row0]
-                                  for x, y in p["vertices_scene"]]}
-                    for p in saved["polygons"]]
-        print(f"  resuming with {len(existing)} saved polygons")
+    saved_polygons = _load_saved_polygons(
+        polygons_path, row_start, col_start)
+    if saved_polygons:
+        print(f"  resuming with {len(saved_polygons)} saved polygons")
 
-    print("----------")
-    print("| STEP 7 | annotating")
-    print("----------")
+    _print_step(7, "annotating")
     print(f"  cell {area_id} ({split}); "
           "close the window or press Finish when done")
-    drawn = sw.annotate_area(chips, existing)
-    kept = [{"class": p["class"],
-             "vertices_scene": [[x + col0, y + row0]
-                                for x, y in p["vertices"]]}
-            for p in existing]
-    new = [{"class": p["class"],
-            "vertices_scene": [[x + col0, y + row0]
-                               for x, y in p["vertices"]]}
-           for p in drawn]
-    merged = [{"id": number + 1, **polygon}
-              for number, polygon in enumerate(kept + new)]
-    sw.save_polygons(polygons_path, tile, area_id, split, window, merged)
-    print(f"  saved {len(merged)} polygons to {polygons_path}")
+    new_polygons = sw.annotate_area(display_chips, saved_polygons)
+
+    all_area_polygons = saved_polygons + new_polygons
+    scene_polygons = _move_polygons_to_scene(
+        all_area_polygons, row_start, col_start)
+    numbered_polygons = []
+    for polygon_number, polygon in enumerate(scene_polygons, start=1):
+        numbered_polygons.append({"id": polygon_number, **polygon})
+
+    sw.save_polygons(
+        polygons_path,
+        tile,
+        area_id,
+        split,
+        window,
+        numbered_polygons)
+    print(f"  saved {len(numbered_polygons)} polygons to {polygons_path}")
     return 0
 
 
+# %% Command-line workflow
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Training and test areas form one assignment and must be supplied together.
     if (args.train_areas is None) != (args.test_areas is None):
         parser.error("--train-areas and --test-areas go together")
 
-    # Validate the split before anything expensive: a rejected
-    # assignment must not cost a full median run first.
-    assignment = None
+    # Validate before any expensive image processing.
+    area_assignment = None
     if args.train_areas is not None:
         try:
-            assignment = sw.validate_areas(args.train_areas,
-                                           args.test_areas)
+            area_assignment = sw.validate_areas(
+                args.train_areas, args.test_areas)
         except ValueError as exc:
             print(f"bad split: {exc}")
             return 2
-        print(f"split validates: {assignment}")
+        print(f"split validates: {area_assignment}")
 
     sat_images_dir = os.path.join(c.DATA_DIR, "sat-images")
-    month_key = args.month.replace("-", "")
-    scenes = [s for s in sw.discover_scenes(sat_images_dir)
-              if _month_stamp(s) == month_key]
+    requested_month = args.month.replace("-", "")
+    scenes = []
+    for scene_dir in sw.discover_scenes(sat_images_dir):
+        if _scene_month(scene_dir) == requested_month:
+            scenes.append(scene_dir)
+
     if not scenes:
         print(f"no scenes for month {args.month} in {sat_images_dir}")
         return 1
     print(f"using {len(scenes)} scenes for {args.month}")
-    tile = os.path.basename(scenes[0]).split("_")[5]
+    tile = _scene_tile(scenes[0])
 
-    if assignment is not None:
-        print("----------")
-        print("| STEP 6 | freezing areas")
-        print("----------")
-        areas_path = os.path.join(args.out_dir, "areas.json")
-        os.makedirs(args.out_dir, exist_ok=True)
-        sw.freeze_areas(areas_path, tile, assignment)
-        print(f"  froze {assignment} to {areas_path}")
+    # Mode 1: save the training/test assignment.
+    if area_assignment is not None:
+        _freeze_area_split(args.out_dir, tile, area_assignment)
 
-    if args.annotate is None and assignment is None:
-        _overview(args.out_dir, scenes, args.device)
-        _features(args.out_dir, scenes, args.device, args.month)
+    # Mode 2: build the overview and monthly features.
+    if args.annotate is None and area_assignment is None:
+        _create_navigation_overview(args.out_dir, scenes, args.device)
+        _create_monthly_features(
+            args.out_dir, scenes, args.device, args.month)
         print("inspect the overview preview, draw polygons with "
               "--annotate CELL, then freeze the split")
         return 0
 
+    # Mode 3: draw or resume polygons in one area.
     if args.annotate is not None:
-        return _annotate(args.out_dir, scenes, args.annotate)
+        return _annotate_grid_area(args.out_dir, scenes, args.annotate)
+
     print("pass --annotate CELL to draw polygons in one area")
     return 0
 

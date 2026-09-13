@@ -142,7 +142,7 @@ def main(argv=None):
         if LP_MODE:
             image_arrays_list.append(image_arrays)
 
-        # moving known-feature masking from step 2 to step 5 (after composite)
+        # moved known-feature masking from step 2 to step 5 (after composite)
 
         # %% 2. Mask Clouds (Omnicloudmask)
         print("----------")

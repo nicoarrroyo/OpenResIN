@@ -1,19 +1,10 @@
-"""Monthly surface-water classification track (V1 random forest).
+"""Prepare imagery and polygon labels for the V1 surface-water classifier.
 
-Replacement-track code for the water/non-water classifier agreed after the
-3 September 2026 call (issue 04). The old patch/CNN path in labelling.py
-stays untouched until the V1 is proven. It holds the 60 m navigation
-overview, the monthly 10 m feature extraction, and polygon annotation
-persistence for the water/non-water labels.
-
-The 60 m overview is a navigation aid, not the classifier input and not
-its validity mask. Direct inference at 60 m is outside OmniCloudMask's
-documented 10-50 m range; the trial showed it tracks visible clouds, which
-is all the overview needs.
-
-Numbers live in config.py (SW_ settings); nothing here is tuned per run.
+The 60 m composite is only a navigation aid. Classifier features use the
+separate 10 m workflow.
 """
 
+import json
 import os
 import warnings
 
@@ -24,27 +15,9 @@ from . import config as c
 from . import image_handling as image_do
 
 
+# %% 1. Discover scenes and build the 60 m overview
 def discover_scenes(sat_images_dir):
-    """Sorted scene directories, skipping anything that is not a scene.
-
-    Step 1 of openresin-label-sw (overview inputs).
-
-    This stays separate from ui_do.list_folders because that helper is
-    looser: unsorted, no directory check (a scene-named file passes),
-    coupled to c.N_IMAGES, and it exits on multi-tile input.
-
-    Parameters
-    ----------
-    sat_images_dir : str
-        Directory holding extracted Sentinel-2 scenes.
-
-    Returns
-    -------
-    list of str
-        Full paths to directories whose names are seven
-        underscore-separated fields ending in .SAFE. Scene-named regular
-        files are rejected, not read.
-    """
+    """Return sorted Sentinel-2 scene directories from one directory."""
     scenes = []
     for name in sorted(os.listdir(sat_images_dir)):
         path = os.path.join(sat_images_dir, name)
@@ -56,8 +29,7 @@ def discover_scenes(sat_images_dir):
 
 
 def _granule_img_data(scene_dir, res):
-    """IMG_DATA directory for one resolution, following the single
-    granule below GRANULE/. Step 1 of openresin-label-sw."""
+    """Return one scene's IMG_DATA directory for the requested resolution."""
     granule = os.path.join(scene_dir, "GRANULE")
     subdirs = [d for d in os.listdir(granule)
                if os.path.isdir(os.path.join(granule, d))]
@@ -68,19 +40,7 @@ def _granule_img_data(scene_dir, res):
 
 
 def read_scene_60m(scene_dir):
-    """Read one scene's 60 m red/green/NIR bands, TCI and metadata.
-
-    Step 1 of openresin-label-sw (overview inputs).
-
-    Band values come through image_to_array, the same numerical reader
-    the old path uses, so values keep their meaning. Raises
-    FileNotFoundError if a band or TCI file is missing rather than
-    silently continuing with a partial scene.
-
-    Returns a plain dict with keys red, green, nir (float32 2D arrays),
-    tci (uint8 (3, H, W) display image), meta (60 m TCI metadata) and
-    meta10 (10 m B04 metadata used to map the fixed grid).
-    """
+    """Return red, green, nir, tci, meta, and meta10 for one 60 m scene."""
     img_60m = _granule_img_data(scene_dir, "R60m")
     tci_names = [f for f in sorted(os.listdir(img_60m))
                  if f.endswith("_TCI_60m.jp2")]
@@ -118,15 +78,10 @@ def read_scene_60m(scene_dir):
 
 def predict_cloud_mask(red, green, nir, inference_device=None,
                        inference_dtype=None):
-    """OmniCloudMask clear/cloud/shadow mask for one scene at 60 m.
+    """Run OmniCloudMask on explicit red, green, and NIR arrays.
 
-    Step 1 of openresin-label-sw (overview inputs).
-
-    This stays separate from two_mask_clouds because that step assumes
-    the old band order, masks arrays in place, and asks interactive
-    questions on failure. Here the bands arrive explicitly and a failed
-    device falls back to CPU with a printed warning, so the overview
-    still runs on machines without CUDA.
+    CUDA failure falls back to CPU. The 60 m caller uses the result only for
+    navigation because 60 m is outside OmniCloudMask's documented range.
     """
     from omnicloudmask import predict_from_array
 
@@ -164,23 +119,7 @@ def predict_cloud_mask(red, green, nir, inference_device=None,
 
 
 def mask_invalid(tci, cloud_mask, bands):
-    """TCI with cloud, shadow and nodata pixels set to NaN.
-
-    Step 1 of openresin-label-sw (overview inputs).
-
-    Parameters
-    ----------
-    tci : np.ndarray, uint8 (3, H, W)
-    cloud_mask : np.ndarray, 2D, OmniCloudMask classes
-    bands : sequence of 2D arrays
-        The input bands; pixels that are zero in all of them are
-        unimaged swath edge. OmniCloudMask labels these clear, so they
-        need this explicit mask or zeros leak into the composite.
-
-    Returns
-    -------
-    np.ndarray, float32 (3, H, W), NaN where unusable.
-    """
+    """Set cloud, shadow, and all-band-zero TCI pixels to NaN."""
     masked = tci.astype(np.float32)
     unusable = np.isin(cloud_mask, c.SW_CLOUD_SHADOW_CLASSES)
     nodata = np.ones(cloud_mask.shape, dtype=bool)
@@ -191,52 +130,28 @@ def mask_invalid(tci, cloud_mask, bands):
 
 
 def composite_scenes(masked_by_date):
-    """Median composite over dates from masked TCI arrays.
-
-    Step 1 of openresin-label-sw (overview inputs).
-
-    Parameters
-    ----------
-    masked_by_date : dict date -> list of (3, H, W) float32 arrays
-        One list entry per acquisition; dates with two acquisitions
-        (e.g. 27 April) hold two arrays.
-
-    Returns
-    -------
-    composite : (3, H, W) float32, NaN where no date was valid
-    validity : 2D bool array, True where at least one date was valid
-
-    Within each date the median of valid acquisitions is taken (two
-    values average, one passes through), then the median across dates.
-    All-NaN locations yield NaN by construction; that is the explicit
-    NoData path, not a warning to silence, so only that expected
-    RuntimeWarning is filtered, narrowly.
-    """
+    """Take the valid median within each date, then across dates."""
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="All-NaN slice encountered",
             category=RuntimeWarning)
-        per_date = [np.nanmedian(np.stack(arrs, axis=0), axis=0)
-                    for arrs in masked_by_date.values()]
-        composite = np.nanmedian(np.stack(list(per_date), axis=0), axis=0)
+
+        median_by_date = []
+        for date_arrays in masked_by_date.values():
+            stacked_date = np.stack(date_arrays, axis=0)
+            date_median = np.nanmedian(stacked_date, axis=0)
+            median_by_date.append(date_median)
+
+        stacked_dates = np.stack(median_by_date, axis=0)
+        composite = np.nanmedian(stacked_dates, axis=0)
+
     validity = np.isfinite(composite).all(axis=0)
     return composite, validity
 
 
+# %% Grid definition and overview provenance
 def grid_cell_window(cell_id):
-    """10 m pixel window for a numbered grid cell.
-
-    Step 6 of openresin-label-sw (area freezing).
-
-    IDs are stable row-major numbers 1-484 (row 1 is the north edge)
-    and mean nothing without the tile.
-
-    Returns
-    -------
-    (row_start, row_end, col_start, col_end) in 10 m pixels, where the
-    end is exclusive. Full cells are 500 x 500; cells in the last row
-    or column are clipped to the tile edge (480 px).
-    """
+    """Return one row-major grid cell as an exclusive 10 m pixel window."""
     n_cells = c.SW_GRID_ROWS * c.SW_GRID_COLS
     if not isinstance(cell_id, (int, np.integer)) \
             or not 1 <= cell_id <= n_cells:
@@ -250,15 +165,7 @@ def grid_cell_window(cell_id):
 
 
 def cell_to_display(meta10, meta60, cell_id):
-    """Map a grid cell's 10 m window onto 60 m overview pixels.
-
-    Step 1 of openresin-label-sw (overview preview).
-
-    Cell bounds go through geographic coordinates, so a cell keeps its
-    exact fractional overview position (500 10 m px = 83.33 60 m px)
-    instead of accumulating rounding error from cell to cell.
-    Returns (row_start, row_end, col_start, col_end) as floats.
-    """
+    """Map a 10 m grid cell onto the 60 m overview using georeferencing."""
     row_start, row_end, col_start, col_end = grid_cell_window(cell_id)
     to_60m = ~meta60["transform"]
     x0, y0 = meta10["transform"] * (col_start, row_start)
@@ -269,15 +176,7 @@ def cell_to_display(meta10, meta60, cell_id):
 
 
 def build_provenance(scene_dirs, month, inference_device=None):
-    """Record what went into an overview composite.
-
-    Step 1 of openresin-label-sw (overview inputs).
-
-    Returns a plain dict: tile, month, source scene folder names,
-    grid identity, aggregation operators, mask and inference settings.
-    Callers persist it next to the composite; nothing about the
-    composite is interpretable without it.
-    """
+    """Describe the scenes and settings used to build an overview."""
     if inference_device is None:
         inference_device = c.SW_OCM_DEVICE
     scene_names = sorted(os.path.basename(d) for d in scene_dirs)
@@ -301,16 +200,9 @@ def build_provenance(scene_dirs, month, inference_device=None):
     }
 
 
+# %% 2. Read and mask the 10 m classifier bands
 def read_scene_10m(scene_dir):
-    """Read one scene's 10 m classifier bands, TCI and metadata.
-
-    Step 2 of openresin-label-sw (feature inputs).
-
-    Same contract as read_scene_60m: values through image_to_array,
-    FileNotFoundError on a missing file. Returns a plain dict with
-    keys blue, green, red, nir (float32 2D), tci (uint8 (3, H, W))
-    and meta (10 m metadata).
-    """
+    """Return blue, green, red, nir, tci, and meta for one 10 m scene."""
     img_10m = _granule_img_data(scene_dir, "R10m")
     tci_names = [f for f in sorted(os.listdir(img_10m))
                  if f.endswith("_TCI_10m.jp2")]
@@ -342,38 +234,27 @@ def read_scene_10m(scene_dir):
 
 
 def mask_scene_bands(scene, cloud_mask):
-    """Cloud/shadow and nodata masking for the four 10 m bands.
+    """Set cloud, shadow, and all-band-zero pixels to NaN in every band.
 
-    Step 2 of openresin-label-sw (feature inputs).
-
-    Returns a new dict of float32 arrays with unusable pixels as NaN.
-    The nodata test (zero in every band) must run on the unmasked
-    bands: once NaN is written, == 0 stops matching, so masking one
-    band after another would silently keep zeros in every band after
-    the first while the valid-date count (from the first) claims
-    NoData. That exact mismatch is what this single joint mask avoids.
+    Find all-band-zero pixels before writing any NaNs. Otherwise the first
+    edited band prevents the remaining zero comparisons from matching.
     """
     names = ("blue", "green", "red", "nir")
     invalid = np.ones(cloud_mask.shape, dtype=bool)
     for key in names:
         invalid &= (scene[key] == c.SW_NODATA_VALUE)
     cloudy = np.isin(cloud_mask, c.SW_CLOUD_SHADOW_CLASSES)
-    masked = {}
+    masked_bands = {}
     for key in names:
-        arr = scene[key].astype(np.float32)
-        arr[cloudy | invalid] = np.nan
-        masked[key] = arr
-    return masked
+        band = scene[key].astype(np.float32)
+        band[cloudy | invalid] = np.nan
+        masked_bands[key] = band
+    return masked_bands
 
 
+# %% 3. Calculate spectral indices
 def scene_indices(scene):
-    """NDWI and NDVI from one scene's masked bands, float32.
-
-    Step 3 of openresin-label-sw.
-
-    Assumes cloud/shadow/nodata pixels are already NaN, so the indices
-    inherit invalidity instead of computing with masked values.
-    """
+    """Calculate NDWI and NDVI from one scene's masked bands."""
     with np.errstate(divide="ignore", invalid="ignore"):
         ndwi = (scene["green"] - scene["nir"]) / (scene["green"] + scene["nir"])
         ndvi = (scene["nir"] - scene["red"]) / (scene["nir"] + scene["red"])
@@ -381,56 +262,53 @@ def scene_indices(scene):
             "NDVI": ndvi.astype(np.float32)}
 
 
-def monthly_features(dated_features):
-    """Monthly median of the six classifier features.
+# %% 4. Calculate monthly features
+def monthly_features(features_by_date):
+    """Take the valid median within each date, then across dates.
 
-    Step 4 of openresin-label-sw.
-
-    Parameters
-    ----------
-    dated_features : dict date -> list of dicts
-        One dict per acquisition mapping each of c.SW_FEATURES to a
-        masked 2D float32 array. Dates with two acquisitions hold two
-        dicts; masked pixels are NaN.
-
-    Returns
-    -------
-    features : dict name -> 2D float32, NaN where no date was valid
-    valid_count : 2D int array, valid dates per pixel
-
-    Same operator as the overview composite: median of valid
-    same-day values, then median across dates. One valid date is
-    sufficient for V1; zero means NoData.
+    Also return the number of valid dates at each pixel. One valid date is
+    sufficient; zero valid dates means NoData.
     """
+    feature_names = list(c.SW_FEATURES)
+
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="All-NaN slice encountered",
             category=RuntimeWarning)
-        per_date = []
-        for dicts in dated_features.values():
-            per_date.append({name: np.nanmedian(
-                np.stack([d[name] for d in dicts], axis=0), axis=0)
-                for name in c.SW_FEATURES})
-        names = list(c.SW_FEATURES)
-        features = {name: np.nanmedian(
-            np.stack([d[name] for d in per_date], axis=0), axis=0)
-            for name in names}
-    valid_count = np.zeros_like(features[names[0]], dtype=np.int32)
-    for one in per_date:
-        valid_count += np.isfinite(one[names[0]]).astype(np.int32)
-    return features, valid_count
+
+        median_features_by_date = []
+        for date_features in features_by_date.values():
+            date_median = {}
+            for feature_name in feature_names:
+                acquisitions = []
+                for acquisition in date_features:
+                    acquisitions.append(acquisition[feature_name])
+                stacked_acquisitions = np.stack(acquisitions, axis=0)
+                date_median[feature_name] = np.nanmedian(
+                    stacked_acquisitions, axis=0)
+            median_features_by_date.append(date_median)
+
+        monthly_median = {}
+        for feature_name in feature_names:
+            date_arrays = []
+            for date_features in median_features_by_date:
+                date_arrays.append(date_features[feature_name])
+            stacked_dates = np.stack(date_arrays, axis=0)
+            monthly_median[feature_name] = np.nanmedian(
+                stacked_dates, axis=0)
+
+    first_feature = feature_names[0]
+    valid_count = np.zeros_like(monthly_median[first_feature], dtype=np.int32)
+    for date_features in median_features_by_date:
+        date_is_valid = np.isfinite(date_features[first_feature])
+        valid_count += date_is_valid.astype(np.int32)
+
+    return monthly_median, valid_count
 
 
+# %% 5. Mask known non-water features
 def mask_known_features(arrays, meta, boundaries_path, urban_path):
-    """Sea/ocean and urban masking with NaN fill, in place.
-
-    Step 5 of openresin-label-sw.
-
-    Rivers and known reservoirs are deliberately NOT masked: they are
-    valid water training examples under the V1 contract. A missing
-    source file skips that mask with a message instead of failing,
-    and the skip is recorded in the run provenance by the caller.
-    """
+    """Mask sea and urban areas with NaN, leaving valid water features."""
     if boundaries_path is not None:
         for key in arrays:
             image_do.known_feature_mask(
@@ -446,17 +324,9 @@ def mask_known_features(arrays, meta, boundaries_path, urban_path):
     return arrays
 
 
+# %% 6. Validate and save the area split
 def validate_areas(train_ids, test_ids):
-    """Check six frozen windows: four training, two test.
-
-    Step 6 of openresin-label-sw (area freezing).
-
-    IDs must be distinct cells 1-484, and no training cell may touch a
-    test cell (8-neighbourhood): a grid boundary does not establish
-    independence, so adjacent opposite-split cells are rejected rather
-    than warned about. Keeping a whole water body in one split stays
-    the annotator's job; geometry cannot check it.
-    """
+    """Require four training and two test cells that do not touch, even diagonally."""
     n_cells = c.SW_GRID_ROWS * c.SW_GRID_COLS
     if len(train_ids) != 4 or len(test_ids) != 2:
         raise ValueError("need exactly 4 training and 2 test areas, got "
@@ -478,8 +348,12 @@ def validate_areas(train_ids, test_ids):
                         and 0 <= other[1] < c.SW_GRID_COLS:
                     yield other[0] * c.SW_GRID_COLS + other[1] + 1
 
-    clashes = [(t, s) for t in train_ids for s in test_ids
-               if s in set(neighbours(t))]
+    clashes = []
+    for train_id in train_ids:
+        neighbouring_ids = set(neighbours(train_id))
+        for test_id in test_ids:
+            if test_id in neighbouring_ids:
+                clashes.append((train_id, test_id))
     if clashes:
         raise ValueError(
             "training and test areas must not neighbour each other, "
@@ -489,10 +363,7 @@ def validate_areas(train_ids, test_ids):
 
 
 def freeze_areas(path, tile, assignment):
-    """Persist validated area IDs, splits and 10 m windows as JSON.
-
-    Step 6 of openresin-label-sw (area freezing)."""
-    import json
+    """Save validated area IDs, splits, and 10 m windows."""
 
     record = {"tile": tile, "grid": {"cell_px": c.SW_CELL_PX,
                                      "rows": c.SW_GRID_ROWS,
@@ -509,26 +380,13 @@ def freeze_areas(path, tile, assignment):
 
 
 def load_areas(path):
-    """Read back a frozen areas file.
-
-    Step 6 of openresin-label-sw (area freezing)."""
-    import json
-
+    """Read a saved area assignment."""
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)
 
 
 def save_polygons(path, tile, area_id, split, window, polygons):
-    """Persist drawn polygons as the authoritative annotation.
-
-    Step 7 of openresin-label-sw (annotation).
-
-    polygons is a list of dicts with keys id (int, 1-based in draw
-    order), class ("water" or "non-water") and vertices_scene (list of
-    [x, y] in 10 m scene pixels). Pixels outside polygons stay
-    unlabelled; no full-scene label mask is written.
-    """
-    import json
+    """Save water/non-water polygons in 10 m scene coordinates."""
 
     for polygon in polygons:
         if polygon["class"] not in ("water", "non-water"):
@@ -541,14 +399,9 @@ def save_polygons(path, tile, area_id, split, window, polygons):
     return record
 
 
+# %% 7. Read and annotate one area
 def read_tci_window(scene_dir, window):
-    """One area's TCI chip from a 10 m scene without reading the tile.
-
-    Step 7 of openresin-label-sw (annotation).
-
-    window is (row_start, row_end, col_start, col_end) in scene pixels.
-    Returns a uint8 (H, W, 3) display array.
-    """
+    """Read one 10 m TCI area without loading the whole tile."""
     from rasterio.windows import Window as RioWindow
 
     img_10m = _granule_img_data(scene_dir, "R10m")
@@ -563,89 +416,99 @@ def read_tci_window(scene_dir, window):
 
 
 def annotate_area(chips, existing=None):
-    """Draw water/non-water polygons on one area chip.
+    """Draw polygons while switching between the composite and dated chips.
 
-    Step 7 of openresin-label-sw (annotation).
-
-    Drawing mechanics are ported from the parked prompt_roi tool; the
-    coordinate mapping is fixed (that tool scaled both axes by the
-    image height, which is wrong for non-square views).
-
-    Parameters
-    ----------
-    chips : dict label -> uint8 (H, W, 3) display arrays, all one shape
-        The composite view plus one entry per acquisition date. The
-        annotator flips between them to check a polygon stays the same
-        class on every usable date; polygons persist across flips.
-    existing : list of polygon dicts, optional
-        Previously saved polygons with chip-pixel vertices, overlaid
-        read-only so work can resume. Same shape as save_polygons
-        records but with "vertices" in chip pixels.
-
-    Returns
-    -------
-    list of {"class": "water" | "non-water", "vertices": [[x, y], ...]}
-        Newly drawn polygons in chip pixels as floats.
+    Saved polygons are shown for reference. The return value contains only
+    polygons drawn during this session.
     """
     import tkinter as tk
     from PIL import Image, ImageTk
 
-    labels = list(chips.keys())
-    height, width = chips[labels[0]].shape[:2]
-    CLOSE_RADIUS = 8
+    chip_names = list(chips.keys())
+    height, width = chips[chip_names[0]].shape[:2]
+    closing_distance = 8
 
     root = tk.Tk()
     root.title("Draw water and non-water polygons")
     canvas = tk.Canvas(root, width=width, height=height)
     canvas.pack()
-    photos = {key: ImageTk.PhotoImage(Image.fromarray(chips[key]))
-              for key in labels}
-    canvas.create_image(0, 0, anchor="nw", image=photos[labels[0]])
+    photo_images = {}
+    for chip_name in chip_names:
+        photo_images[chip_name] = ImageTk.PhotoImage(
+            Image.fromarray(chips[chip_name]))
+    canvas.create_image(
+        0, 0, anchor="nw", image=photo_images[chip_names[0]])
 
-    drawn = []
-    current_points = []
+    new_polygons = []
+    current_vertices = []
     vertex_markers = []
     edge_lines = []
     preview_line = None
     status_label = None
+    colors_by_class = {
+        "water": "dodgerblue",
+        "non-water": "darkorange",
+    }
 
     def set_status(message):
         status_label.config(text=message)
 
-    colors = {"water": "dodgerblue", "non-water": "darkorange"}
-    for polygon in existing or []:
-        flat = [coord for vertex in polygon["vertices"] for coord in vertex]
+    def flatten_vertices(vertices):
+        coordinates = []
+        for x, y in vertices:
+            coordinates.extend((x, y))
+        return coordinates
+
+    def draw_polygon_outline(polygon_class, vertices):
         canvas.create_polygon(
-            flat, outline=colors.get(polygon["class"], "white"),
-            width=2, fill="")
+            flatten_vertices(vertices),
+            outline=colors_by_class.get(polygon_class, "white"),
+            width=2,
+            fill="")
+
+    for polygon in existing or []:
+        draw_polygon_outline(polygon["class"], polygon["vertices"])
 
     def redraw_preview(event=None):
         nonlocal preview_line
         if preview_line is not None:
             canvas.delete(preview_line)
             preview_line = None
-        if current_points and event is not None:
-            x0, y0 = current_points[-1]
+        if current_vertices and event is not None:
+            previous_x, previous_y = current_vertices[-1]
             preview_line = canvas.create_line(
-                x0, y0, event.x, event.y, fill="yellow", dash=(4, 2))
+                previous_x,
+                previous_y,
+                event.x,
+                event.y,
+                fill="yellow",
+                dash=(4, 2))
 
     def on_click(event):
-        if current_points:
-            x0, y0 = current_points[0]
-            if abs(event.x - x0) <= CLOSE_RADIUS \
-                    and abs(event.y - y0) <= CLOSE_RADIUS \
-                    and len(current_points) >= 3:
+        if current_vertices:
+            first_x, first_y = current_vertices[0]
+            near_first_vertex = (
+                abs(event.x - first_x) <= closing_distance
+                and abs(event.y - first_y) <= closing_distance
+            )
+            if near_first_vertex and len(current_vertices) >= 3:
                 close_as("water")
                 return
-        current_points.append((float(event.x), float(event.y)))
+
+        current_vertices.append((float(event.x), float(event.y)))
         vertex_markers.append(canvas.create_oval(
             event.x - 2, event.y - 2, event.x + 2, event.y + 2,
             fill="yellow", outline=""))
-        if len(current_points) > 1:
+        if len(current_vertices) > 1:
+            previous_x, previous_y = current_vertices[-2]
             edge_lines.append(canvas.create_line(
-                current_points[-2][0], current_points[-2][1],
-                event.x, event.y, fill="yellow", width=2))
-        set_status(f"{len(current_points)} vertices "
+                previous_x,
+                previous_y,
+                event.x,
+                event.y,
+                fill="yellow",
+                width=2))
+        set_status(f"{len(current_vertices)} vertices "
                    "(w: close as water, n: close as non-water)")
 
     def clear_drawing():
@@ -655,55 +518,69 @@ def annotate_area(chips, existing=None):
         if preview_line is not None:
             canvas.delete(preview_line)
             preview_line = None
-        del current_points[:]
+        del current_vertices[:]
         del vertex_markers[:]
         del edge_lines[:]
 
-    def close_as(cls):
-        if len(current_points) < 3:
+    def close_as(polygon_class):
+        if len(current_vertices) < 3:
             set_status("need at least 3 vertices before closing")
             return
-        drawn.append({"class": cls,
-                      "vertices": [[x, y] for x, y in current_points]})
-        flat = [coord for point in current_points for coord in point]
-        canvas.create_polygon(flat, outline=colors[cls], width=2, fill="")
+
+        vertices = []
+        for x, y in current_vertices:
+            vertices.append([x, y])
+        new_polygons.append({
+            "class": polygon_class,
+            "vertices": vertices,
+        })
+        draw_polygon_outline(polygon_class, current_vertices)
         clear_drawing()
-        set_status(f"saved {cls} polygon {len(drawn)} "
-                   f"({sum(p['class'] == 'water' for p in drawn)} water)")
+
+        water_count = 0
+        for polygon in new_polygons:
+            if polygon["class"] == "water":
+                water_count += 1
+        set_status(
+            f"saved {polygon_class} polygon {len(new_polygons)} "
+            f"({water_count} water)")
 
     def cancel_shape():
         clear_drawing()
         set_status("shape cancelled")
 
     def undo_point():
-        if not current_points:
+        if not current_vertices:
             return
-        current_points.pop()
+        current_vertices.pop()
         canvas.delete(vertex_markers.pop())
         if edge_lines:
             canvas.delete(edge_lines.pop())
-        set_status(f"{len(current_points)} vertices")
+        set_status(f"{len(current_vertices)} vertices")
 
-    def switch_chip(key):
-        canvas.create_image(0, 0, anchor="nw", image=photos[key])
-        set_status(f"viewing {key}; {len(drawn)} new polygons")
+    def switch_chip(chip_name):
+        canvas.create_image(
+            0, 0, anchor="nw", image=photo_images[chip_name])
+        set_status(f"viewing {chip_name}; {len(new_polygons)} new polygons")
 
-    def finish():
+    def finish_labelling():
         root.destroy()
 
     canvas.bind("<ButtonPress-1>", on_click)
     canvas.bind("<Motion>", redraw_preview)
-    root.bind("w", lambda event: close_as("water"))
-    root.bind("n", lambda event: close_as("non-water"))
-    root.bind("<Escape>", lambda event: cancel_shape())
-    root.bind("<BackSpace>", lambda event: undo_point())
+    root.bind("w", lambda _event: close_as("water"))
+    root.bind("n", lambda _event: close_as("non-water"))
+    root.bind("<Escape>", lambda _event: cancel_shape())
+    root.bind("<BackSpace>", lambda _event: undo_point())
 
     buttons = tk.Frame(root)
     buttons.pack(fill=tk.X, pady=6)
-    for key in labels:
-        tk.Button(buttons, text=key,
-                  command=lambda key=key: switch_chip(key)).pack(
-                      side=tk.LEFT, padx=4)
+    for chip_name in chip_names:
+        tk.Button(
+            buttons,
+            text=chip_name,
+            command=lambda name=chip_name: switch_chip(name)).pack(
+                side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Close as water",
               command=lambda: close_as("water")).pack(side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Close as non-water",
@@ -711,12 +588,12 @@ def annotate_area(chips, existing=None):
                   side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Undo point", command=undo_point).pack(
         side=tk.LEFT, padx=4)
-    tk.Button(buttons, text="Finish", command=finish).pack(
+    tk.Button(buttons, text="Finish", command=finish_labelling).pack(
         side=tk.LEFT, padx=4, expand=True, fill=tk.X)
 
     status_label = tk.Label(root, text="", bd=1, relief=tk.SUNKEN, anchor=tk.W)
     status_label.pack(fill=tk.X, padx=2, pady=2)
     set_status("click polygon vertices; flip dates to check stability")
-    root.protocol("WM_DELETE_WINDOW", finish)
+    root.protocol("WM_DELETE_WINDOW", finish_labelling)
     root.mainloop()
-    return drawn
+    return new_polygons
