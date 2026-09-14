@@ -162,7 +162,7 @@ def _find_known_feature_masks():
         os.path.join(masks_dir, "boundaries", "*.gpkg"),
         os.path.join(masks_dir, "boundaries", "*.geojson"),
     ])
-    urban_path = _find_first_file([
+    urban_path = _find_first_file([ # TODO does this search deeply enough?
         os.path.join(masks_dir, "urban-areas", "*.tif"),
         os.path.join(masks_dir, "urban-areas", "*.tiff"),
         os.path.join(masks_dir, "urban-areas", "*.jp2"),
