@@ -1,3 +1,5 @@
+import io
+
 import numpy as np
 import pytest
 
@@ -188,6 +190,46 @@ def test_monthly_features_median_and_count():
     assert np.allclose(features["B04"], 57.5)  # median of 15 and 100
     assert np.allclose(features["NDWI"], 57.5)
     assert (valid_count == 2).all()
+
+
+def test_monthly_features_single_acquisition_matches_median():
+    """A single acquisition on a date passes through directly with identical values."""
+    single = _feature_dicts(42.0)
+    dated = {"2026-04-25": [single]}
+    features, valid_count = sw.monthly_features(dated)
+    assert np.allclose(features["B02"], 42.0)
+    assert (valid_count == 1).all()
+
+
+def test_monthly_features_keeps_redirected_output_minimal(capsys):
+    """Redirected output contains one durable completion message."""
+    dated = {"2026-04-25": [_feature_dicts(10.0)],
+             "2026-04-30": [_feature_dicts(20.0)]}
+
+    sw.monthly_features(dated)
+
+    assert capsys.readouterr().out == "  medians complete\n"
+
+
+def test_monthly_features_rewrites_progress_in_interactive_terminal(
+        monkeypatch):
+    """Interactive feature progress occupies one line per median phase."""
+    class InteractiveOutput(io.StringIO):
+        def isatty(self):
+            return True
+
+    terminal = InteractiveOutput()
+    monkeypatch.setattr("sys.stdout", terminal)
+    dated = {"2026-04-25": [_feature_dicts(10.0)],
+             "2026-04-30": [_feature_dicts(20.0)]}
+
+    sw.monthly_features(dated)
+
+    output = terminal.getvalue()
+    assert "\r\033[K  date median | 2026-04-30 | NDVI" in output
+    assert "\r\033[K  monthly median | NDVI" in output
+    assert output.endswith("\r\033[K  medians complete\n")
+    assert output.count("\n") == 1
 
 
 def test_scene_indices_inherit_nodata():

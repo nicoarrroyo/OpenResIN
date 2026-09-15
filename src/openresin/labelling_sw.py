@@ -6,6 +6,7 @@ separate 10 m workflow.
 
 import json
 import os
+import sys
 import warnings
 
 import numpy as np
@@ -277,25 +278,41 @@ def monthly_features(features_by_date):
             category=RuntimeWarning)
 
         median_features_by_date = []
-        for date_features in features_by_date.values():
+        for date, date_features in features_by_date.items():
             date_median = {}
             for feature_name in feature_names:
+                if sys.stdout.isatty(): # check for interactive terminal
+                    print(
+                        f"\r\033[K  date median | {date} | {feature_name}",
+                        end="", flush=True)
                 acquisitions = []
                 for acquisition in date_features:
                     acquisitions.append(acquisition[feature_name])
-                stacked_acquisitions = np.stack(acquisitions, axis=0)
-                date_median[feature_name] = np.nanmedian(
-                    stacked_acquisitions, axis=0)
+                if len(acquisitions) == 1:
+                    date_median[feature_name] = acquisitions[0]
+                else:
+                    stacked_acquisitions = np.stack(acquisitions, axis=0)
+                    date_median[feature_name] = np.nanmedian(
+                        stacked_acquisitions, axis=0)
             median_features_by_date.append(date_median)
 
         monthly_median = {}
         for feature_name in feature_names:
+            if sys.stdout.isatty():
+                print(
+                    f"\r\033[K  monthly median | {feature_name}",
+                    end="", flush=True)
             date_arrays = []
             for date_features in median_features_by_date:
                 date_arrays.append(date_features[feature_name])
             stacked_dates = np.stack(date_arrays, axis=0)
             monthly_median[feature_name] = np.nanmedian(
                 stacked_dates, axis=0)
+
+        if sys.stdout.isatty():
+            print("\r\033[K  medians complete", flush=True)
+        else:
+            print("  medians complete")
 
     first_feature = feature_names[0]
     valid_count = np.zeros_like(monthly_median[first_feature], dtype=np.int32)
