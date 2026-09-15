@@ -58,7 +58,7 @@ def _scene_tile(scene_dir):
 
 def _find_first_file(patterns):
     for pattern in patterns:
-        matching_files = sorted(glob.glob(pattern))
+        matching_files = sorted(glob.glob(pattern, recursive=True))
         if matching_files:
             return matching_files[0]
     return None
@@ -162,10 +162,10 @@ def _find_known_feature_masks():
         os.path.join(masks_dir, "boundaries", "*.gpkg"),
         os.path.join(masks_dir, "boundaries", "*.geojson"),
     ])
-    urban_path = _find_first_file([ # TODO does this search deeply enough?
-        os.path.join(masks_dir, "urban-areas", "*.tif"),
-        os.path.join(masks_dir, "urban-areas", "*.tiff"),
-        os.path.join(masks_dir, "urban-areas", "*.jp2"),
+    urban_path = _find_first_file([
+        os.path.join(masks_dir, "urban-areas", "**", "*.tif"),
+        os.path.join(masks_dir, "urban-areas", "**", "*.tiff"),
+        os.path.join(masks_dir, "urban-areas", "**", "*.jp2"),
     ])
     return boundaries_path, urban_path
 
