@@ -20,3 +20,28 @@ def test_find_known_feature_masks_finds_nested_urban_tif(
     _, found_urban_path = label_sw._find_known_feature_masks()
 
     assert found_urban_path == str(urban_path)
+
+
+def test_main_passes_requested_month_to_overview(tmp_path, monkeypatch):
+    """The overview provenance must name the month selected by the CLI."""
+    scene = (
+        tmp_path
+        / "S2B_MSIL2A_20270315T110619_N0512_R137_T31UCU_X.SAFE"
+    )
+    calls = []
+    monkeypatch.setattr(
+        label_sw.sw, "discover_scenes", lambda _sat_images_dir: [str(scene)])
+    monkeypatch.setattr(
+        label_sw, "_create_navigation_overview",
+        lambda out_dir, scenes, device, month: calls.append(month))
+    monkeypatch.setattr(
+        label_sw, "_create_monthly_features",
+        lambda out_dir, scenes, device, month: None)
+
+    result = label_sw.main([
+        "--month", "2027-03",
+        "--out-dir", str(tmp_path / "outputs"),
+    ])
+
+    assert result == 0
+    assert calls == ["2027-03"]

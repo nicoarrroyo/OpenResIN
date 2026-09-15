@@ -109,7 +109,7 @@ def _save_grid_preview(composite, metadata_10m, metadata_60m, path):
     figure.savefig(path, dpi=150)
 
 
-def _create_navigation_overview(out_dir, scenes, device):
+def _create_navigation_overview(out_dir, scenes, device, month):
     """Build the 60 m navigation preview unless its cache is current."""
     overview_dir = os.path.join(out_dir, "overview")
     provenance_path = os.path.join(overview_dir, "provenance.json")
@@ -118,7 +118,8 @@ def _create_navigation_overview(out_dir, scenes, device):
 
     _print_step(1, "navigation overview")
 
-    current_provenance = sw.build_provenance(scenes, "overview", device)
+    current_provenance = sw.build_provenance(
+        scenes, month=month, inference_device=device)
     if os.path.isfile(provenance_path) and os.path.isfile(preview_path):
         with open(provenance_path, encoding="utf-8") as handle:
             saved_provenance = json.load(handle)
@@ -410,7 +411,8 @@ def main(argv=None):
 
     # Mode 2: build the overview and monthly features.
     if args.annotate is None and area_assignment is None:
-        _create_navigation_overview(args.out_dir, scenes, args.device)
+        _create_navigation_overview(
+            args.out_dir, scenes, args.device, args.month)
         _create_monthly_features(
             args.out_dir, scenes, args.device, args.month)
         print("inspect the overview preview, draw polygons with "
