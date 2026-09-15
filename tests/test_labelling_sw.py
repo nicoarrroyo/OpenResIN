@@ -192,13 +192,24 @@ def test_monthly_features_median_and_count():
     assert (valid_count == 2).all()
 
 
-def test_monthly_features_single_acquisition_matches_median():
-    """A single acquisition on a date passes through directly with identical values."""
-    single = _feature_dicts(42.0)
-    dated = {"2026-04-25": [single]}
-    features, valid_count = sw.monthly_features(dated)
-    assert np.allclose(features["B02"], 42.0)
-    assert (valid_count == 1).all()
+def test_monthly_features_skips_single_acquisition_date_median(monkeypatch):
+    """Only repeated dates reach the date-level median calculation."""
+    real_nanmedian = np.nanmedian
+    stack_sizes = []
+
+    def record_stack_size(values, axis):
+        stack_sizes.append(values.shape[0])
+        return real_nanmedian(values, axis=axis)
+
+    monkeypatch.setattr(sw.np, "nanmedian", record_stack_size)
+    dated = {"2026-04-25": [_feature_dicts(10.0)],
+             "2026-04-27": [_feature_dicts(20.0), _feature_dicts(30.0)],
+             "2026-04-30": [_feature_dicts(40.0)]}
+
+    sw.monthly_features(dated)
+
+    feature_count = len(_feature_dicts(0.0))
+    assert stack_sizes == [2] * feature_count + [3] * feature_count
 
 
 def test_monthly_features_keeps_redirected_output_minimal(capsys):
@@ -221,12 +232,15 @@ def test_monthly_features_rewrites_progress_in_interactive_terminal(
     terminal = InteractiveOutput()
     monkeypatch.setattr("sys.stdout", terminal)
     dated = {"2026-04-25": [_feature_dicts(10.0)],
-             "2026-04-30": [_feature_dicts(20.0)]}
+             "2026-04-27": [_feature_dicts(20.0), _feature_dicts(30.0)],
+             "2026-04-30": [_feature_dicts(40.0)]}
 
     sw.monthly_features(dated)
 
     output = terminal.getvalue()
-    assert "\r\033[K  date median | 2026-04-30 | NDVI" in output
+    assert "\r\033[K  date median | 2026-04-27 | NDVI" in output
+    assert "date median | 2026-04-25" not in output
+    assert "date median | 2026-04-30" not in output
     assert "\r\033[K  monthly median | NDVI" in output
     assert output.endswith("\r\033[K  medians complete\n")
     assert output.count("\n") == 1

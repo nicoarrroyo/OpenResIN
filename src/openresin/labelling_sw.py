@@ -271,6 +271,7 @@ def monthly_features(features_by_date):
     sufficient; zero valid dates means NoData.
     """
     feature_names = list(c.SW_FEATURES)
+    interactive_output = sys.stdout.isatty()
 
     with warnings.catch_warnings():
         warnings.filterwarnings(
@@ -279,26 +280,27 @@ def monthly_features(features_by_date):
 
         median_features_by_date = []
         for date, date_features in features_by_date.items():
+            if len(date_features) == 1:
+                median_features_by_date.append(date_features[0])
+                continue
+
             date_median = {}
             for feature_name in feature_names:
-                if sys.stdout.isatty(): # check for interactive terminal
+                if interactive_output:
                     print(
                         f"\r\033[K  date median | {date} | {feature_name}",
                         end="", flush=True)
                 acquisitions = []
                 for acquisition in date_features:
                     acquisitions.append(acquisition[feature_name])
-                if len(acquisitions) == 1:
-                    date_median[feature_name] = acquisitions[0]
-                else:
-                    stacked_acquisitions = np.stack(acquisitions, axis=0)
-                    date_median[feature_name] = np.nanmedian(
-                        stacked_acquisitions, axis=0)
+                stacked_acquisitions = np.stack(acquisitions, axis=0)
+                date_median[feature_name] = np.nanmedian(
+                    stacked_acquisitions, axis=0)
             median_features_by_date.append(date_median)
 
         monthly_median = {}
         for feature_name in feature_names:
-            if sys.stdout.isatty():
+            if interactive_output:
                 print(
                     f"\r\033[K  monthly median | {feature_name}",
                     end="", flush=True)
@@ -309,7 +311,7 @@ def monthly_features(features_by_date):
             monthly_median[feature_name] = np.nanmedian(
                 stacked_dates, axis=0)
 
-        if sys.stdout.isatty():
+        if interactive_output:
             print("\r\033[K  medians complete", flush=True)
         else:
             print("  medians complete")
