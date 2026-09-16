@@ -264,8 +264,12 @@ def calculate_ndwi(green, nir):
     return ndwi
 
 
-def colorize_ndwi(ndwi, vmin=-1.0, vmax=1.0):
-    """Map NDWI to red land, neutral white, blue water, and black NoData."""
+def colorise_ndwi(ndwi, vmin=-0.5, vmax=0.5):
+    """Map NDWI to red land, neutral white, blue water, and black NoData.
+
+    Limits stay centred on zero and clip outside values; stored NDWI
+    values are never altered, only their display colours.
+    """
     import matplotlib
 
     norm_ndwi = np.clip((ndwi - vmin) / (vmax - vmin), 0.0, 1.0)

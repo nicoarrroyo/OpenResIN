@@ -266,21 +266,107 @@ def _lookup_area_tile_and_split(out_dir, area_id, default_tile):
 
 
 # %% 7. Annotate one area
-def _prepare_annotation_chips(scenes, window):
-    """Prepare TCI chips and an unmasked monthly NDWI comparison."""
-    chips_by_date = {}
+def _load_masked_ndwi_window(out_dir, month, tile, scenes, window):
+    """Read the saved masked monthly NDWI for one grid window, if usable.
+
+    Loads the archive without modifying it. Return None with a reason for
+    missing, stale, or corrupt archives so callers can fall back to a regular
+    NDWI window calculated on demand. Includes the reason why it was rejected for
+    the annotation window to display.
+
+    """
+    row0, row1, col0, col1 = window
+    features_path = os.path.join(out_dir, "features.npz")
+    provenance_path = os.path.join(out_dir, "features-provenance.json")
+    if not os.path.isfile(features_path):
+        return None, f"absent: no {features_path}"
+    if not os.path.isfile(provenance_path):
+        return None, f"absent: no {provenance_path}"
+
+    try:
+        with open(provenance_path, encoding="utf-8") as handle:
+            provenance = json.load(handle)
+    except (OSError, ValueError) as exc:
+        return None, f"unreadable provenance {provenance_path}: {exc}"
+
+    masks = provenance.get("masks") or {}
+    expected_sea, expected_urban = _find_known_feature_masks()
+    checks = [
+        ("month", provenance.get("month"), month),
+        ("tile", provenance.get("tile"), tile),
+        ("source_scenes", provenance.get("source_scenes"),
+         sorted(os.path.basename(s) for s in scenes)),
+        ("feature_order", provenance.get("feature_order"),
+         list(c.SW_FEATURES)),
+        ("aggregation", provenance.get("aggregation"),
+         "valid median within date, then median across dates"),
+        ("cloud_shadow_classes", masks.get("cloud_shadow_classes"),
+         list(c.SW_CLOUD_SHADOW_CLASSES)),
+        ("nodata_value", masks.get("nodata_value"), c.SW_NODATA_VALUE),
+        ("sea_source", masks.get("sea_source"), expected_sea),
+        ("urban_source", masks.get("urban_source"), expected_urban),
+    ]
+    for name, saved, current in checks:
+        if saved != current:
+            return None, (f"stale: provenance {name} is {saved!r}, "
+                           f"expected {current!r}")
+    if expected_sea is None or expected_urban is None:
+        return None, ("stale: a mask source is missing on disk "
+                      f"(sea={expected_sea!r}, urban={expected_urban!r})")
+
+    try:
+        with np.load(features_path) as archive:
+            if "NDWI" not in archive:
+                return None, f"corrupt: no NDWI array in {features_path}"
+            full_tile = archive["NDWI"]
+            expected_shape = (c.SW_TILE_PX, c.SW_TILE_PX)
+            if full_tile.shape != expected_shape:
+                return None, (f"wrong-shape: NDWI is {full_tile.shape}, "
+                               f"expected {expected_shape}")
+            cell = full_tile[row0:row1, col0:col1].astype(np.float32)
+    except (OSError, ValueError, KeyError) as exc:
+        return None, f"corrupt: cannot read NDWI from {features_path}: {exc}"
+    return cell, None
+
+
+def _raw_ndwi_composite(scenes, window):
+    """Aggregate unmasked B03/B08 window reads into a monthly NDWI."""
     ndwi_by_date = {}
+    for scene_dir in scenes:
+        date = _scene_date(scene_dir)
+        green = sw.read_band_window(scene_dir, "B03", window)
+        nir = sw.read_band_window(scene_dir, "B08", window)
+        ndwi_by_date.setdefault(date, []).append(
+            sw.calculate_ndwi(green, nir))
+
+    median_ndwi_by_date = {}
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message="All-NaN slice encountered",
+            category=RuntimeWarning)
+
+        for date, date_chips in ndwi_by_date.items():
+            if len(date_chips) == 1:
+                median_ndwi_by_date[date] = date_chips[0]
+            else:
+                stacked_chips = np.stack(date_chips, axis=0)
+                median_ndwi_by_date[date] = np.nanmedian(
+                    stacked_chips, axis=0)
+
+        all_ndwi_dates = np.stack(
+            list(median_ndwi_by_date.values()), axis=0)
+        return np.nanmedian(all_ndwi_dates, axis=0)
+
+
+def _prepare_annotation_chips(scenes, window, out_dir, month, tile):
+    """Prepare TCI chips and a labelled masked-first monthly NDWI."""
+    chips_by_date = {}
     for scene_dir in scenes:
         date = _scene_date(scene_dir)
         chip = sw.read_tci_window(scene_dir, window).astype(np.float32)
         chips_by_date.setdefault(date, []).append(chip)
-        green = sw.read_band_window(scene_dir, "B03", window)
-        nir = sw.read_band_window(scene_dir, "B08", window)
-        ndwi = sw.calculate_ndwi(green, nir)
-        ndwi_by_date.setdefault(date, []).append(ndwi)
 
     median_chips_by_date = {}
-    median_ndwi_by_date = {}
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="All-NaN slice encountered",
@@ -294,23 +380,23 @@ def _prepare_annotation_chips(scenes, window):
                 median_chips_by_date[date] = np.nanmedian(
                     stacked_chips, axis=0)
 
-        for date, date_chips in ndwi_by_date.items():
-            if len(date_chips) == 1:
-                median_ndwi_by_date[date] = date_chips[0]
-            else:
-                stacked_chips = np.stack(date_chips, axis=0)
-                median_ndwi_by_date[date] = np.nanmedian(
-                    stacked_chips, axis=0)
-
         all_dates = np.stack(list(median_chips_by_date.values()), axis=0)
         composite = np.nanmedian(all_dates, axis=0)
-        all_ndwi_dates = np.stack(
-            list(median_ndwi_by_date.values()), axis=0)
-        ndwi_composite = np.nanmedian(all_ndwi_dates, axis=0)
+
+    masked_ndwi, reason = _load_masked_ndwi_window(
+        out_dir, month, tile, scenes, window)
+    if masked_ndwi is not None:
+        ndwi_composite = masked_ndwi
+        ndwi_key = "NDWI (masked)"
+    else:
+        ndwi_composite = _raw_ndwi_composite(scenes, window)
+        ndwi_key = "NDWI (raw)"
+        print(f"  NDWI fallback ({reason}); this view lacks cloud, sea "
+              "and urban masking, and the TCI chips are raw window reads")
 
     display_chips = {
         "composite": composite,
-        "NDWI": sw.colorize_ndwi(ndwi_composite),
+        ndwi_key: sw.colorise_ndwi(ndwi_composite),
         **median_chips_by_date,
     }
     for name, chip in display_chips.items():
@@ -359,7 +445,7 @@ def _move_polygons_to_scene(polygons, row_offset, col_offset):
     return scene_polygons
 
 
-def _annotate_grid_area(out_dir, scenes, area_id):
+def _annotate_grid_area(out_dir, scenes, area_id, month):
     """Open one grid area and append newly drawn polygons to its file."""
     window = sw.grid_cell_window(area_id)
     row_start, _, col_start, _ = window
@@ -367,7 +453,8 @@ def _annotate_grid_area(out_dir, scenes, area_id):
     tile, split = _lookup_area_tile_and_split(
         out_dir, area_id, default_tile)
 
-    display_chips = _prepare_annotation_chips(scenes, window)
+    display_chips = _prepare_annotation_chips(
+        scenes, window, out_dir, month, tile)
     polygons_path = os.path.join(out_dir, f"area-{area_id:03d}.json")
     saved_polygons = _load_saved_polygons(
         polygons_path, row_start, col_start)
@@ -446,7 +533,8 @@ def main(argv=None):
 
     # Mode 3: draw or resume polygons in one area.
     if args.annotate is not None:
-        return _annotate_grid_area(args.out_dir, scenes, args.annotate)
+        return _annotate_grid_area(
+            args.out_dir, scenes, args.annotate, args.month)
 
     print("pass --annotate CELL to draw polygons in one area")
     return 0

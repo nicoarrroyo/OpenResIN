@@ -311,6 +311,20 @@ def test_colorize_ndwi_uses_diverging_water_palette_and_black_nodata():
     assert np.array_equal(rgb[0, 3], [0, 0, 0])
 
 
+def test_colorize_ndwi_resolves_weak_water_at_display_limits():
+    """The tighter [-0.5, 0.5] range keeps faint coastal water visibly blue."""
+    ndwi = np.array([[-0.5, 0.0, 0.13, 0.5, -0.9, 0.9]], dtype=np.float32)
+
+    rgb = sw.colorise_ndwi(ndwi)
+
+    assert rgb[0, 0, 0] > rgb[0, 0, 2]
+    assert np.ptp(rgb[0, 1].astype(np.int16)) <= 1
+    assert rgb[0, 2, 2] > rgb[0, 2, 0]
+    assert rgb[0, 3, 2] > rgb[0, 3, 0]
+    assert np.array_equal(rgb[0, 0], rgb[0, 4])
+    assert np.array_equal(rgb[0, 3], rgb[0, 5])
+
+
 def test_annotate_area_reuses_background_canvas_item(monkeypatch):
     """Switching chips updates one background without covering polygons."""
     button_commands = {}
