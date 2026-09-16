@@ -4,6 +4,7 @@ import argparse
 import glob
 import json
 import os
+import warnings
 
 import numpy as np
 
@@ -266,15 +267,25 @@ def _lookup_area_tile_and_split(out_dir, area_id, default_tile):
 
 # %% 7. Annotate one area
 def _prepare_annotation_chips(scenes, window):
-    """Prepare a composite and one TCI chip per acquisition date."""
+    """Prepare TCI chips and an unmasked monthly NDWI comparison."""
     chips_by_date = {}
+    ndwi_by_date = {}
     for scene_dir in scenes:
         date = _scene_date(scene_dir)
         chip = sw.read_tci_window(scene_dir, window).astype(np.float32)
         chips_by_date.setdefault(date, []).append(chip)
+        green = sw.read_band_window(scene_dir, "B03", window)
+        nir = sw.read_band_window(scene_dir, "B08", window)
+        ndwi = sw.calculate_ndwi(green, nir)
+        ndwi_by_date.setdefault(date, []).append(ndwi)
 
     median_chips_by_date = {}
-    with np.errstate(invalid="ignore"):
+    median_ndwi_by_date = {}
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message="All-NaN slice encountered",
+            category=RuntimeWarning)
+
         for date, date_chips in chips_by_date.items():
             if len(date_chips) == 1:
                 median_chips_by_date[date] = date_chips[0]
@@ -283,11 +294,25 @@ def _prepare_annotation_chips(scenes, window):
                 median_chips_by_date[date] = np.nanmedian(
                     stacked_chips, axis=0)
 
+        for date, date_chips in ndwi_by_date.items():
+            if len(date_chips) == 1:
+                median_ndwi_by_date[date] = date_chips[0]
+            else:
+                stacked_chips = np.stack(date_chips, axis=0)
+                median_ndwi_by_date[date] = np.nanmedian(
+                    stacked_chips, axis=0)
+
         all_dates = np.stack(list(median_chips_by_date.values()), axis=0)
         composite = np.nanmedian(all_dates, axis=0)
+        all_ndwi_dates = np.stack(
+            list(median_ndwi_by_date.values()), axis=0)
+        ndwi_composite = np.nanmedian(all_ndwi_dates, axis=0)
 
-    display_chips = {"composite": composite}
-    display_chips.update(median_chips_by_date)
+    display_chips = {
+        "composite": composite,
+        "NDWI": sw.colorize_ndwi(ndwi_composite),
+        **median_chips_by_date,
+    }
     for name, chip in display_chips.items():
         display_chips[name] = np.nan_to_num(
             chip, nan=0).astype(np.uint8)

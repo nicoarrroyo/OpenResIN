@@ -1,6 +1,6 @@
 # Open-source Reservoir Identifier and Navigator (OpenResIN)
 
-OpenResIN is a project for identifying small water reservoirs in Sentinel-2 satellite imagery. It is a four-stage pipeline: label a scene by hand, train a classification model on the labelled image patches, run that model across a whole tile, and score the result.
+OpenResIN is a project for identifying small water reservoirs in Sentinel-2 satellite imagery. Its existing patch-based pipeline has four stages: label a scene by hand, train a classification model on the labelled image patches, run that model across a whole tile, and score the result. A fifth command, `openresin-label-sw`, is an experimental labelling and feature-building path for a replacement pixel-level surface-water classifier; it does not yet connect to the existing trainer.
 
 Each stage of this pipeline is a console script, and each stage hands the next one files on disk. These files are all ordinary PNGs and CSVs, so you can open them and look at them at any point.
 
@@ -26,7 +26,7 @@ python -m venv .venv
 
 Activate it with `.\.venv\Scripts\Activate.ps1` on Windows PowerShell, or `source .venv/bin/activate` on Linux and macOS.
 
-**3. Install the package.** This installs every dependency and puts the four pipeline stages on your PATH as console scripts.
+**3. Install the package.** This installs the dependencies and puts the four existing pipeline stages plus `openresin-label-sw` on your PATH as console scripts.
 
 ```bash
 pip install -e .
@@ -63,7 +63,7 @@ This will install `cupy-cuda12x`. If your CUDA is a different generation, instal
 
 ## Usage
 
-Four commands, run in order. Each one reads what the previous one wrote:
+The four existing pipeline commands run in order. Each one reads what the previous one wrote:
 
 ```
 data/sat-images/*.SAFE
@@ -86,6 +86,17 @@ metrics
 ```
 
 Every command takes `-h` and `--help` to list its flags and their defaults.
+
+### Experimental surface-water labelling (`openresin-label-sw`)
+
+This fifth command is a separate, incomplete path toward a monthly pixel-level water/non-water classifier. With Sentinel-2 L2A `.SAFE` scenes in `data/sat-images/` and the masks described in [`data/README.md`](data/README.md), for example:
+
+```bash
+openresin-label-sw --month 2026-04
+openresin-label-sw --month 2026-04 --annotate 25
+```
+
+The first command builds a numbered navigation preview and six monthly feature arrays under `outputs/label-water/`. Inspect the preview and choose a suitable cell number before using `--annotate`; the second command opens that cell for water and non-water polygon labels and saves them as `area-025.json` in the same output directory. `--train-areas` and `--test-areas` can record a four-training/two-test area split; run `openresin-label-sw --help` for the exact flags. The current annotation TCI and NDWI chips are raw window reads, not cloud-masked views, even though the saved monthly feature arrays use cloud masking and, when the supplied mask files are present, sea and urban masking. This command does **not** train a random forest, and `openresin-train` still trains the older patch model.
 
 ### 1. Set up the data directory
 
@@ -190,6 +201,8 @@ The test suite is deliberately thin. `test_config.py` checks the path anchors su
 ## Project Status and Current Limitations
 
 Labelling and training are the stable parts of the pipeline: `openresin-label` and `openresin-train` run end to end and produce outputs as intended. The actual model for `openresin-train` may not stay as a Keras Sequential classifier, but the scaffolding of the stages themselves is intentional.
+
+`openresin-label-sw` is experimental and separate from that four-stage path. Its monthly features and polygon labels are not yet connected to a pixel classifier or held-out evaluation.
 
 Prediction and evaluation are provisional: `openresin-predict` and `openresin-evaluate` both run and both produce output, but the methodology behind them is not settled and is expected to be replaced. The code is left in place so the pipeline can be executed end to end, and so that a reader can see what is currently being done before deciding what should be done instead.
 

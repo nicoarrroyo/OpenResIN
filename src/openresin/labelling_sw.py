@@ -254,12 +254,32 @@ def mask_scene_bands(scene, cloud_mask):
 
 
 # %% 3. Calculate spectral indices
+def calculate_ndwi(green, nir):
+    """Calculate float32 NDWI, preserving zero-sum pixels as NoData."""
+    denominator = green + nir
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ndwi = (green - nir) / denominator
+    ndwi = ndwi.astype(np.float32)
+    ndwi[denominator == 0] = np.nan
+    return ndwi
+
+
+def colorize_ndwi(ndwi, vmin=-1.0, vmax=1.0):
+    """Map NDWI to red land, neutral white, blue water, and black NoData."""
+    import matplotlib
+
+    norm_ndwi = np.clip((ndwi - vmin) / (vmax - vmin), 0.0, 1.0)
+    rgba = matplotlib.colormaps["RdBu"](norm_ndwi)
+    rgb = (rgba[..., :3] * 255).astype(np.uint8)
+    rgb[np.isnan(ndwi)] = 0
+    return rgb
+
+
 def scene_indices(scene):
     """Calculate NDWI and NDVI from one scene's masked bands."""
     with np.errstate(divide="ignore", invalid="ignore"):
-        ndwi = (scene["green"] - scene["nir"]) / (scene["green"] + scene["nir"])
         ndvi = (scene["nir"] - scene["red"]) / (scene["nir"] + scene["red"])
-    return {"NDWI": ndwi.astype(np.float32),
+    return {"NDWI": calculate_ndwi(scene["green"], scene["nir"]),
             "NDVI": ndvi.astype(np.float32)}
 
 
@@ -419,6 +439,21 @@ def save_polygons(path, tile, area_id, split, window, polygons):
 
 
 # %% 7. Read and annotate one area
+def read_band_window(scene_dir, band, window):
+    """Read one 10 m band area as a 2D float32 array."""
+    from rasterio.windows import Window as RioWindow
+
+    img_10m = _granule_img_data(scene_dir, "R10m")
+    names = [f for f in sorted(os.listdir(img_10m))
+             if f.endswith(f"_{band}_10m.jp2")]
+    if not names:
+        raise FileNotFoundError(f"no 10 m {band} in {img_10m}")
+    row0, row1, col0, col1 = window
+    rio_window = RioWindow(col0, row0, col1 - col0, row1 - row0)
+    with rasterio.open(os.path.join(img_10m, names[0])) as src:
+        return src.read(1, window=rio_window).astype(np.float32)
+
+
 def read_tci_window(scene_dir, window):
     """Read one 10 m TCI area without loading the whole tile."""
     from rasterio.windows import Window as RioWindow
@@ -455,7 +490,7 @@ def annotate_area(chips, existing=None):
     for chip_name in chip_names:
         photo_images[chip_name] = ImageTk.PhotoImage(
             Image.fromarray(chips[chip_name]))
-    canvas.create_image(
+    image_item = canvas.create_image(
         0, 0, anchor="nw", image=photo_images[chip_names[0]])
 
     new_polygons = []
@@ -578,8 +613,7 @@ def annotate_area(chips, existing=None):
         set_status(f"{len(current_vertices)} vertices")
 
     def switch_chip(chip_name):
-        canvas.create_image(
-            0, 0, anchor="nw", image=photo_images[chip_name])
+        canvas.itemconfig(image_item, image=photo_images[chip_name])
         set_status(f"viewing {chip_name}; {len(new_polygons)} new polygons")
 
     def finish_labelling():

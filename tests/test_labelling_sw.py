@@ -1,7 +1,11 @@
 import io
+import sys
+from types import SimpleNamespace
+from unittest.mock import ANY, MagicMock
 
 import numpy as np
 import pytest
+import rasterio
 
 from openresin import labelling_sw as sw
 
@@ -256,6 +260,91 @@ def test_scene_indices_inherit_nodata():
     assert np.isclose(indices["NDVI"][0, 0], (50 - 25) / (50 + 25))
     assert np.isnan(indices["NDWI"][0, 1])
     assert np.isnan(indices["NDVI"][0, 1])
+
+
+def test_calculate_ndwi_handles_values_zero_sum_and_nodata():
+    """NDWI is float32, while zero-sum and missing pixels stay NoData."""
+    green = np.array([[75.0, 0.0, np.nan]], dtype=np.float32)
+    nir = np.array([[25.0, 0.0, 10.0]], dtype=np.float32)
+
+    ndwi = sw.calculate_ndwi(green, nir)
+
+    assert ndwi.shape == (1, 3)
+    assert ndwi.dtype == np.float32
+    assert np.isclose(ndwi[0, 0], 0.5)
+    assert np.isnan(ndwi[0, 1])
+    assert np.isnan(ndwi[0, 2])
+
+
+def test_read_band_window_reads_requested_10m_pixels_as_float32(tmp_path):
+    """Band quicklooks read only the requested source window."""
+    image_dir = (
+        tmp_path / "scene.SAFE" / "GRANULE" / "tile" / "IMG_DATA" / "R10m"
+    )
+    image_dir.mkdir(parents=True)
+    band_path = image_dir / "tile_B03_10m.jp2"
+    values = np.arange(20, dtype=np.uint16).reshape(4, 5)
+    with rasterio.open(
+            band_path, "w", driver="GTiff", height=4, width=5, count=1,
+            dtype=values.dtype,
+            transform=rasterio.Affine(10, 0, 0, 0, -10, 40)) as dst:
+        dst.write(values, 1)
+
+    band = sw.read_band_window(str(tmp_path / "scene.SAFE"), "B03",
+                               (1, 3, 2, 5))
+
+    assert band.dtype == np.float32
+    assert np.array_equal(band, values[1:3, 2:5])
+
+
+def test_colorize_ndwi_uses_diverging_water_palette_and_black_nodata():
+    """Land is red, water blue, zero neutral, and NoData black."""
+    ndwi = np.array([[-1.0, 0.0, 1.0, np.nan]], dtype=np.float32)
+
+    rgb = sw.colorize_ndwi(ndwi)
+
+    assert rgb.shape == (1, 4, 3)
+    assert rgb.dtype == np.uint8
+    assert rgb[0, 0, 0] > rgb[0, 0, 2]
+    assert np.ptp(rgb[0, 1].astype(np.int16)) <= 1
+    assert rgb[0, 2, 2] > rgb[0, 2, 0]
+    assert np.array_equal(rgb[0, 3], [0, 0, 0])
+
+
+def test_annotate_area_reuses_background_canvas_item(monkeypatch):
+    """Switching chips updates one background without covering polygons."""
+    button_commands = {}
+    root = MagicMock()
+    canvas = MagicMock()
+    canvas.create_image.return_value = 17
+    root.mainloop.side_effect = lambda: button_commands["NDWI"]()
+
+    def make_button(_parent, text, command):
+        button_commands[text] = command
+        return MagicMock()
+
+    fake_tk = SimpleNamespace(
+        Tk=lambda: root,
+        Canvas=lambda *_args, **_kwargs: canvas,
+        Frame=lambda *_args, **_kwargs: MagicMock(),
+        Button=make_button,
+        Label=lambda *_args, **_kwargs: MagicMock(),
+        LEFT="left",
+        X="x",
+        SUNKEN="sunken",
+        W="w",
+    )
+    from PIL import ImageTk
+    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+    chips = {
+        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
+        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
+    }
+
+    assert sw.annotate_area(chips) == []
+    assert canvas.create_image.call_count == 1
+    canvas.itemconfig.assert_called_once_with(17, image=ANY)
 
 
 def test_mask_scene_bands_masks_every_band():
