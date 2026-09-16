@@ -297,11 +297,11 @@ def test_read_band_window_reads_requested_10m_pixels_as_float32(tmp_path):
     assert np.array_equal(band, values[1:3, 2:5])
 
 
-def test_colorize_ndwi_uses_diverging_water_palette_and_black_nodata():
+def test_colorise_ndwi_uses_diverging_water_palette_and_black_nodata():
     """Land is red, water blue, zero neutral, and NoData black."""
     ndwi = np.array([[-1.0, 0.0, 1.0, np.nan]], dtype=np.float32)
 
-    rgb = sw.colorize_ndwi(ndwi)
+    rgb = sw.colorise_ndwi(ndwi)
 
     assert rgb.shape == (1, 4, 3)
     assert rgb.dtype == np.uint8
@@ -311,7 +311,7 @@ def test_colorize_ndwi_uses_diverging_water_palette_and_black_nodata():
     assert np.array_equal(rgb[0, 3], [0, 0, 0])
 
 
-def test_colorize_ndwi_resolves_weak_water_at_display_limits():
+def test_colorise_ndwi_resolves_weak_water_at_display_limits():
     """The tighter [-0.5, 0.5] range keeps faint coastal water visibly blue."""
     ndwi = np.array([[-0.5, 0.0, 0.13, 0.5, -0.9, 0.9]], dtype=np.float32)
 
