@@ -275,7 +275,7 @@ def colorise_ndwi(ndwi, vmin=-0.5, vmax=0.5):
     norm_ndwi = np.clip((ndwi - vmin) / (vmax - vmin), 0.0, 1.0)
     rgba = matplotlib.colormaps["RdBu"](norm_ndwi)
     rgb = (rgba[..., :3] * 255).astype(np.uint8)
-    rgb[np.isnan(ndwi)] = 0
+    rgb[~np.isfinite(ndwi)] = 0
     return rgb
 
 
@@ -647,6 +647,17 @@ def annotate_area(chips, existing=None):
         side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Finish", command=finish_labelling).pack(
         side=tk.LEFT, padx=4, expand=True, fill=tk.X)
+
+    if "NDWI (masked)" in chip_names:
+        source_note = ("NDWI is masked (cloud, sea, urban); "
+                       "TCI composite and dated chips are raw window reads")
+    elif "NDWI (raw)" in chip_names:
+        source_note = ("NDWI is raw (no cloud, sea or urban masking); "
+                       "TCI composite and dated chips are raw window reads")
+    else:
+        source_note = "TCI composite and dated chips are raw window reads"
+    source_label = tk.Label(root, text=source_note, anchor=tk.W)
+    source_label.pack(fill=tk.X, padx=2)
 
     status_label = tk.Label(root, text="", bd=1, relief=tk.SUNKEN, anchor=tk.W)
     status_label.pack(fill=tk.X, padx=2, pady=2)
