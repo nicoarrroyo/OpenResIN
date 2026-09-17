@@ -476,8 +476,9 @@ def read_tci_window(scene_dir, window):
 def annotate_area(chips, existing=None):
     """Draw polygons while switching between the composite and dated chips.
 
-    Saved polygons are shown for reference. The return value contains only
-    polygons drawn during this session.
+    Saved polygons are shown and can be removed with Undo, newest first.
+    Return (new_polygons, kept_existing): polygons drawn this session and
+    the loaded polygons left after any undo. Finish saves kept + new.
     """
     import tkinter as tk
     from PIL import Image, ImageTk
@@ -534,6 +535,9 @@ def annotate_area(chips, existing=None):
         0, 0, anchor="nw", image=photo_images[chip_names[0]])
 
     new_polygons = []
+    polygon_outlines = []
+    kept_existing = list(existing or [])
+    kept_outlines = []
     current_vertices = []
     vertex_markers = []
     edge_lines = []
@@ -554,14 +558,15 @@ def annotate_area(chips, existing=None):
         return coordinates
 
     def draw_polygon_outline(polygon_class, vertices):
-        canvas.create_polygon(
+        return canvas.create_polygon(
             flatten_vertices(vertices),
             outline=colors_by_class.get(polygon_class, "white"),
             width=2,
             fill="")
 
-    for polygon in existing or []:
-        draw_polygon_outline(polygon["class"], polygon["vertices"])
+    for polygon in kept_existing:
+        kept_outlines.append(draw_polygon_outline(
+            polygon["class"], polygon["vertices"]))
 
     def redraw_preview(event=None):
         nonlocal preview_line
@@ -636,7 +641,8 @@ def annotate_area(chips, existing=None):
             "class": polygon_class,
             "vertices": vertices,
         })
-        draw_polygon_outline(polygon_class, current_vertices)
+        polygon_outlines.append(
+            draw_polygon_outline(polygon_class, current_vertices))
         clear_drawing()
 
         water_count = 0
@@ -660,6 +666,27 @@ def annotate_area(chips, existing=None):
             canvas.delete(edge_lines.pop())
         set_status(f"{len(current_vertices)} vertices")
 
+    def undo_last_polygon():
+        if new_polygons:
+            new_polygons.pop()
+            canvas.delete(polygon_outlines.pop())
+            water_count = 0
+            for polygon in new_polygons:
+                if polygon["class"] == "water":
+                    water_count += 1
+            set_status(
+                f"removed last polygon ({len(new_polygons)} new left, "
+                f"{water_count} water)")
+            return
+        if kept_existing:
+            kept_existing.pop()
+            canvas.delete(kept_outlines.pop())
+            set_status(
+                f"removed saved polygon ({len(kept_existing)} saved left); "
+                "Finish will save the change")
+            return
+        set_status("nothing to undo")
+
     def switch_chip(chip_name):
         canvas.itemconfig(image_item, image=photo_images[chip_name])
         set_status(f"viewing {chip_name}; {len(new_polygons)} new polygons")
@@ -671,6 +698,7 @@ def annotate_area(chips, existing=None):
     canvas.bind("<Motion>", redraw_preview)
     root.bind("w", lambda _event: close_as("water"))
     root.bind("n", lambda _event: close_as("non-water"))
+    root.bind("u", lambda _event: undo_last_polygon())
     root.bind("<Escape>", lambda _event: cancel_shape())
     root.bind("<BackSpace>", lambda _event: undo_point())
 
@@ -688,6 +716,8 @@ def annotate_area(chips, existing=None):
               command=lambda: close_as("non-water")).pack(
                   side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Undo point", command=undo_point).pack(
+        side=tk.LEFT, padx=4)
+    tk.Button(buttons, text="Undo polygon", command=undo_last_polygon).pack(
         side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Finish", command=finish_labelling).pack(
         side=tk.LEFT, padx=4, expand=True, fill=tk.X)
@@ -708,4 +738,4 @@ def annotate_area(chips, existing=None):
     set_status("click polygon vertices; flip dates to check stability")
     root.protocol("WM_DELETE_WINDOW", finish_labelling)
     root.mainloop()
-    return new_polygons
+    return new_polygons, kept_existing

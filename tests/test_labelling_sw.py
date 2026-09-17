@@ -403,7 +403,7 @@ def test_annotate_area_reuses_background_canvas_item(monkeypatch):
 
     root.mainloop.side_effect = run_session
 
-    result = sw.annotate_area(chips)
+    new_polygons, kept = sw.annotate_area(chips)
     assert canvas.create_image.call_count == 1
     canvas.itemconfig.assert_called_once_with(17, image=ANY)
     root.state.assert_called_with("zoomed")
@@ -416,10 +416,163 @@ def test_annotate_area_reuses_background_canvas_item(monkeypatch):
     assert canvas_kwargs["width"] == expected_scaled
     assert canvas_kwargs["height"] == expected_scaled
     assert len(scrollbar_calls) == 2
-    assert result == [{
+    assert new_polygons == [{
         "class": "water",
         "vertices": [[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]],
     }]
+    assert kept == []
+
+
+def test_annotate_area_undo_last_polygon(monkeypatch):
+    """Undo polygon drops the newest closed boundary and its outline."""
+    button_commands = {}
+    canvas_bindings = {}
+    root_bindings = {}
+    scroll_offset = 10
+    expected_scale = 4
+
+    root = MagicMock()
+    root.winfo_screenwidth.return_value = 1920
+    root.winfo_screenheight.return_value = 1080
+    canvas = MagicMock()
+    canvas.create_image.return_value = 17
+    canvas.canvasx.side_effect = lambda value: value + scroll_offset
+    canvas.canvasy.side_effect = lambda value: value + scroll_offset
+    canvas.create_polygon.side_effect = [101, 102]
+    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
+        seq, func)
+    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
+        seq, func)
+
+    def make_button(_parent, text, command):
+        button_commands[text] = command
+        return MagicMock()
+
+    fake_tk = SimpleNamespace(
+        Tk=lambda: root,
+        Canvas=lambda *_args, **_kwargs: canvas,
+        Frame=lambda *_args, **_kwargs: MagicMock(),
+        Button=make_button,
+        Label=lambda *_args, **_kwargs: MagicMock(),
+        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
+        TclError=Exception,
+        LEFT="left",
+        RIGHT="right",
+        BOTTOM="bottom",
+        X="x",
+        Y="y",
+        BOTH="both",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
+        SUNKEN="sunken",
+        W="w",
+    )
+    from PIL import ImageTk
+    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+
+    def click(image_x, image_y):
+        canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
+            x=image_x * expected_scale - scroll_offset,
+            y=image_y * expected_scale - scroll_offset))
+
+    def run_session():
+        button_commands["Undo polygon"]()
+        for point in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
+            click(*point)
+        root_bindings["w"](SimpleNamespace())
+        for point in [(10.0, 10.0), (12.0, 10.0), (10.0, 12.0)]:
+            click(*point)
+        root_bindings["n"](SimpleNamespace())
+        button_commands["Undo polygon"]()
+
+    root.mainloop.side_effect = run_session
+    chips = {
+        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
+        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
+    }
+
+    new_polygons, kept = sw.annotate_area(chips)
+    assert new_polygons == [{
+        "class": "water",
+        "vertices": [[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]],
+    }]
+    assert kept == []
+    canvas.delete.assert_any_call(102)
+    assert "u" in root_bindings
+
+
+def test_annotate_area_undo_saved_polygon(monkeypatch):
+    """Undo after reopen drops the session polygon first, then the saved one."""
+    button_commands = {}
+    canvas_bindings = {}
+    root_bindings = {}
+    scroll_offset = 10
+    expected_scale = 4
+
+    root = MagicMock()
+    root.winfo_screenwidth.return_value = 1920
+    root.winfo_screenheight.return_value = 1080
+    canvas = MagicMock()
+    canvas.create_image.return_value = 17
+    canvas.canvasx.side_effect = lambda value: value + scroll_offset
+    canvas.canvasy.side_effect = lambda value: value + scroll_offset
+    canvas.create_polygon.side_effect = [301, 302]
+    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
+        seq, func)
+    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
+        seq, func)
+
+    def make_button(_parent, text, command):
+        button_commands[text] = command
+        return MagicMock()
+
+    fake_tk = SimpleNamespace(
+        Tk=lambda: root,
+        Canvas=lambda *_args, **_kwargs: canvas,
+        Frame=lambda *_args, **_kwargs: MagicMock(),
+        Button=make_button,
+        Label=lambda *_args, **_kwargs: MagicMock(),
+        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
+        TclError=Exception,
+        LEFT="left",
+        RIGHT="right",
+        BOTTOM="bottom",
+        X="x",
+        Y="y",
+        BOTH="both",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
+        SUNKEN="sunken",
+        W="w",
+    )
+    from PIL import ImageTk
+    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+
+    def run_session():
+        for image_x, image_y in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
+            canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
+                x=image_x * expected_scale - scroll_offset,
+                y=image_y * expected_scale - scroll_offset))
+        root_bindings["w"](SimpleNamespace())
+        button_commands["Undo polygon"]()
+        button_commands["Undo polygon"]()
+
+    root.mainloop.side_effect = run_session
+    chips = {
+        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
+        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
+    }
+    existing = [{"class": "water",
+                 "vertices": [[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]}]
+
+    new_polygons, kept = sw.annotate_area(chips, existing)
+    assert new_polygons == []
+    assert kept == []
+    assert len(existing) == 1
+    deleted = [call.args[0] for call in canvas.delete.call_args_list]
+    assert deleted.index(302) < deleted.index(301)
 
 
 def test_mask_scene_bands_masks_every_band():

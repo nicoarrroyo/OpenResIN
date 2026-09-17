@@ -446,7 +446,7 @@ def _move_polygons_to_scene(polygons, row_offset, col_offset):
 
 
 def _annotate_grid_area(out_dir, scenes, area_id, month):
-    """Open one grid area and append newly drawn polygons to its file."""
+    """Open one grid area, then save kept plus newly drawn polygons."""
     window = sw.grid_cell_window(area_id)
     row_start, _, col_start, _ = window
     default_tile = _scene_tile(scenes[0])
@@ -464,9 +464,13 @@ def _annotate_grid_area(out_dir, scenes, area_id, month):
     _print_step(7, "annotating")
     print(f"  cell {area_id} ({split}); "
           "close the window or press Finish when done")
-    new_polygons = sw.annotate_area(display_chips, saved_polygons)
+    new_polygons, kept_polygons = sw.annotate_area(
+        display_chips, saved_polygons)
+    removed = len(saved_polygons) - len(kept_polygons)
+    if removed:
+        print(f"  removed {removed} saved polygon(s) via Undo")
 
-    all_area_polygons = saved_polygons + new_polygons
+    all_area_polygons = kept_polygons + new_polygons
     scene_polygons = _move_polygons_to_scene(
         all_area_polygons, row_start, col_start)
     numbered_polygons = []
