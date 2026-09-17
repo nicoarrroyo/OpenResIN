@@ -4,9 +4,12 @@ The 60 m composite is only a navigation aid. Classifier features use the
 separate 10 m workflow.
 """
 
+import hashlib
 import json
 import os
+import re
 import sys
+import tempfile
 import warnings
 
 import numpy as np
@@ -428,18 +431,243 @@ def load_areas(path):
         return json.load(handle)
 
 
-def save_polygons(path, tile, area_id, split, window, polygons):
-    """Save water/non-water polygons in 10 m scene coordinates."""
+AREA_COMPLETION_SCHEMA_VERSION = 1
+COMPLETION_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
+
+def file_sha256(path, chunk_size=1 << 20):
+    """Stream one file's bytes into a SHA256 hex digest."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def annotations_digest(tile, area_id, split, window, polygons,
+                       exclusions=None):
+    """Digest the annotation revision for a completion decision.
+
+    Uses parsed values, not raw file bytes, so whitespace changes do not
+    invalidate completion. Display-only polygon ids and the completion
+    object itself do not affect the digest. Numbers are preserved exactly.
+    """
+    canonical_polygons = []
+    for polygon in polygons or []:
+        canonical_polygons.append({
+            "class": polygon["class"],
+            "vertices_scene": polygon["vertices_scene"],
+        })
+    canonical_exclusions = []
+    for exclusion in exclusions or []:
+        canonical_exclusions.append({
+            "vertices_scene": exclusion["vertices_scene"],
+        })
+    canonical = {
+        "tile": tile,
+        "area_id": area_id,
+        "split": split,
+        "window": list(window),
+        "polygons": canonical_polygons,
+        "exclusions": canonical_exclusions,
+    }
+    payload = json.dumps(
+        canonical, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _check_scene_vertices(vertices, where):
+    if not isinstance(vertices, list) or len(vertices) < 3:
+        raise ValueError(f"{where} needs at least 3 scene vertices, "
+                         f"got {vertices!r}")
+    for point in vertices:
+        if (not isinstance(point, (list, tuple)) or len(point) != 2
+                or isinstance(point[0], bool)
+                or isinstance(point[1], bool)
+                or not isinstance(point[0], (int, float))
+                or not isinstance(point[1], (int, float))):
+            raise ValueError(f"{where} vertices must be [x, y] numbers, "
+                             f"got {point!r}")
+
+
+def validate_area_record(record):
+    """Reject a malformed area record instead of overwriting it."""
+    if not isinstance(record, dict):
+        raise ValueError(f"area record must be an object, got {record!r}")
+    for key in ("tile", "area_id", "split", "window", "polygons"):
+        if key not in record:
+            raise ValueError(f"area record is missing {key!r}")
+    if not isinstance(record["tile"], str):
+        raise ValueError(f"tile must be a string, got {record['tile']!r}")
+    if (not isinstance(record["area_id"], int)
+            or isinstance(record["area_id"], bool)):
+        raise ValueError(f"area_id must be an integer, "
+                         f"got {record['area_id']!r}")
+    window = record["window"]
+    if (not isinstance(window, (list, tuple)) or len(window) != 4
+            or any(isinstance(v, bool) or not isinstance(v, int)
+                   for v in window)):
+        raise ValueError(f"window must be four integers, got {window!r}")
+    row0, row1, col0, col1 = window
+    if not (0 <= row0 < row1 <= c.SW_TILE_PX
+            and 0 <= col0 < col1 <= c.SW_TILE_PX):
+        raise ValueError(f"window {list(window)!r} is outside a "
+                         f"{c.SW_TILE_PX} px tile")
+    if not isinstance(record["split"], str):
+        raise ValueError(f"split must be a string, got {record['split']!r}")
+    if not isinstance(record["polygons"], list):
+        raise ValueError("polygons must be a list")
+    for position, polygon in enumerate(record["polygons"], start=1):
+        if not isinstance(polygon, dict):
+            raise ValueError(f"polygon {position} must be an object")
+        if polygon.get("class") not in ("water", "non-water"):
+            raise ValueError(f"polygon {position} class must be 'water' or "
+                             f"'non-water', got {polygon.get('class')!r}")
+        if "vertices_scene" not in polygon:
+            raise ValueError(f"polygon {position} is missing vertices_scene")
+        _check_scene_vertices(
+            polygon["vertices_scene"], f"polygon {position}")
+        if "id" in polygon and (
+                not isinstance(polygon["id"], int)
+                or isinstance(polygon["id"], bool)):
+            raise ValueError(f"polygon {position} id must be an integer, "
+                             f"got {polygon['id']!r}")
+    exclusions = record.get("exclusions", [])
+    if not isinstance(exclusions, list):
+        raise ValueError("exclusions must be a list")
+    for position, exclusion in enumerate(exclusions, start=1):
+        if not isinstance(exclusion, dict):
+            raise ValueError(f"exclusion {position} must be an object")
+        if "class" in exclusion:
+            raise ValueError(f"exclusion {position} must not have a class")
+        if "vertices_scene" not in exclusion:
+            raise ValueError(f"exclusion {position} is missing vertices_scene")
+        _check_scene_vertices(
+            exclusion["vertices_scene"], f"exclusion {position}")
+    if "completion" in record and record["completion"] is not None:
+        completion = record["completion"]
+        if not isinstance(completion, dict):
+            raise ValueError("completion must be an object")
+        if completion.get("schema_version") \
+                != AREA_COMPLETION_SCHEMA_VERSION:
+            raise ValueError(
+                "completion schema_version must be "
+                f"{AREA_COMPLETION_SCHEMA_VERSION}, got "
+                f"{completion.get('schema_version')!r}")
+        month = completion.get("month")
+        if not isinstance(month, str) or not COMPLETION_MONTH_RE.match(month):
+            raise ValueError(f"completion month must be YYYY-MM, "
+                             f"got {month!r}")
+        for key in ("features_sha256", "features_provenance_sha256",
+                    "annotations_sha256"):
+            value = completion.get(key)
+            if not isinstance(value, str) or len(value) != 64:
+                raise ValueError(f"completion {key} must be a 64-char hex "
+                                 f"digest, got {value!r}")
+    return record
+
+
+def load_area_record(path):
+    """Load one area file with validation; missing exclusions mean []."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            saved = json.load(handle)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"cannot read area file {path}: {exc}") from exc
+    validate_area_record(saved)
+    record = {
+        "tile": saved["tile"],
+        "area_id": saved["area_id"],
+        "split": saved["split"],
+        "window": list(saved["window"]),
+        "polygons": saved["polygons"],
+        "exclusions": list(saved.get("exclusions", [])),
+    }
+    if saved.get("completion") is not None:
+        record["completion"] = saved["completion"]
+    return record
+
+
+def save_area_record(path, record):
+    """Validate then atomically replace one area file.
+
+    Writes to a same-directory temporary file, flushes and fsyncs, then
+    os.replace(). Removes the temporary file if the write fails.
+    """
+    validate_area_record(record)
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=directory,
+                prefix=".area-", suffix=".tmp", delete=False) as handle:
+            tmp_path = handle.name
+            json.dump(record, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        tmp_path = None
+    finally:
+        if tmp_path is not None:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+    return record
+
+
+def save_polygons(path, tile, area_id, split, window, polygons):
+    """Save water/non-water polygons in 10 m scene coordinates.
+
+    Legacy writer kept for existing callers and tests. It writes only the
+    five fixed keys with an atomic replace, so it drops any exclusions or
+    completion decision. New annotation code must use save_area_record().
+    """
     for polygon in polygons:
         if polygon["class"] not in ("water", "non-water"):
             raise ValueError("polygon class must be 'water' or "
                              f"'non-water', got {polygon['class']!r}")
     record = {"tile": tile, "area_id": area_id, "split": split,
               "window": list(window), "polygons": polygons}
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(record, handle, indent=2)
-    return record
+    return save_area_record(path, record)
+
+
+def rasterize_scene_polygons(entries, window):
+    """Rasterize scene-coordinate polygons clipped to one area window.
+
+    Uses the saved float coordinates directly, so half-pixel edge overhangs
+    are preserved. Nothing outside the window is labelled.
+    """
+    row0, row1, col0, col1 = (int(window[0]), int(window[1]),
+                              int(window[2]), int(window[3]))
+    height = row1 - row0
+    width = col1 - col0
+    mask = np.zeros((height, width), dtype=bool)
+    if not entries:
+        return mask
+    from rasterio import features as rio_features
+    from rasterio.transform import Affine
+
+    shapes = []
+    for entry in entries:
+        window_vertices = []
+        for scene_x, scene_y in entry["vertices_scene"]:
+            window_vertices.append(
+                [float(scene_x) - col0, float(scene_y) - row0])
+        if len(window_vertices) < 3:
+            raise ValueError("cannot rasterize a polygon with fewer "
+                             "than 3 vertices")
+        geometry = {"type": "Polygon", "coordinates": [window_vertices]}
+        shapes.append((geometry, 1))
+    burned = rio_features.rasterize(
+        shapes, out_shape=(height, width), fill=0,
+        transform=Affine(1, 0, 0, 0, 1, 0), default_value=1,
+        dtype=np.uint8, all_touched=False)
+    return burned.astype(bool)
 
 
 # %% 7. Read and annotate one area
@@ -473,14 +701,21 @@ def read_tci_window(scene_dir, window):
         return np.transpose(src.read(window=rio_window), (1, 2, 0))
 
 
-def annotate_area(chips, existing=None):
-    """Draw polygons while switching between the composite and dated chips.
+def annotate_reviewed_area(chips, existing=None, existing_exclusions=None,
+                           completion_status="", completion_enabled=False,
+                           completion_reason="", reopen_enabled=False,
+                           preview_provider=None):
+    """Draw polygons and exclusions with an explicit completion decision.
 
-    Saved polygons are shown with their 1-based list number in a small
-    class-coloured tag above the top edge, and can be removed with Undo,
-    newest first.
-    Return (new_polygons, kept_existing): polygons drawn this session and
-    the loaded polygons left after any undo. Finish saves kept + new.
+    Polygons use area-pixel vertices with a water/non-water class, as in
+    annotate_area(). Exclusions use area-pixel vertices with no class and
+    are shown with E-numbers in magenta. Preview shows the proposed
+    four-state footprint from preview_provider(); Complete confirms it and
+    closes with action "complete"; Reopen closes with action "reopen";
+    Finish or window close closes with action "finish" and leaves the save
+    decision to the caller. Cancellation of any preview writes nothing.
+    Return (new_polygons, kept_existing, new_exclusions, kept_exclusions,
+    action).
     """
     import tkinter as tk
     from PIL import Image, ImageTk
@@ -493,7 +728,7 @@ def annotate_area(chips, existing=None):
     HEIGHT_MARGIN = 200
 
     root = tk.Tk()
-    root.title("Draw water and non-water polygons")
+    root.title("Draw water, non-water and exclusions")
     try:
         root.state("zoomed")
     except tk.TclError:
@@ -542,6 +777,12 @@ def annotate_area(chips, existing=None):
     kept_existing = list(existing or [])
     kept_outlines = []
     kept_labels = []
+    new_exclusions = []
+    exclusion_outlines = []
+    new_exclusion_labels = []
+    kept_exclusions = list(existing_exclusions or [])
+    kept_exclusion_outlines = []
+    kept_exclusion_labels = []
     auto_close_enabled = True
     current_chip_name = chip_names[0]
     current_vertices = []
@@ -549,9 +790,11 @@ def annotate_area(chips, existing=None):
     edge_lines = []
     preview_line = None
     status_label = None
+    chosen_action = {"name": "finish"}
     colors_by_class = {
         "water": "dodgerblue",
         "non-water": "darkorange",
+        "exclusion": "magenta",
     }
     # Small number tags: white digits on the class colour, offset above
     # the polygon so the tag never covers the region itself.
@@ -615,6 +858,11 @@ def annotate_area(chips, existing=None):
             polygon["class"], polygon["vertices"]))
         kept_labels.append(draw_number_tag(
             position, polygon["class"], polygon["vertices"]))
+    for position, exclusion in enumerate(kept_exclusions, start=1):
+        kept_exclusion_outlines.append(draw_polygon_outline(
+            "exclusion", exclusion["vertices"]))
+        kept_exclusion_labels.append(draw_number_tag(
+            f"E{position}", "exclusion", exclusion["vertices"]))
 
     def redraw_preview(event=None):
         nonlocal preview_line
@@ -664,7 +912,7 @@ def annotate_area(chips, existing=None):
                 fill="yellow",
                 width=2))
         set_status(f"{len(current_vertices)} vertices "
-                    "(Close as water / non-water to close)")
+                    "(Close as water / non-water / exclusion to close)")
 
     def clear_drawing():
         nonlocal preview_line
@@ -685,6 +933,16 @@ def annotate_area(chips, existing=None):
         vertices = []
         for x, y in current_vertices:
             vertices.append([x, y])
+        if polygon_class == "exclusion":
+            new_exclusions.append({"vertices": vertices})
+            exclusion_outlines.append(
+                draw_polygon_outline("exclusion", current_vertices))
+            position = f"E{len(kept_exclusions) + len(new_exclusions)}"
+            new_exclusion_labels.append(
+                draw_number_tag(position, "exclusion", vertices))
+            clear_drawing()
+            set_status(f"saved exclusion {len(new_exclusions)}")
+            return
         new_polygons.append({
             "class": polygon_class,
             "vertices": vertices,
@@ -748,6 +1006,33 @@ def annotate_area(chips, existing=None):
             return
         set_status("nothing to undo")
 
+    def undo_last_exclusion():
+        if new_exclusions:
+            new_exclusions.pop()
+            canvas.delete(exclusion_outlines.pop())
+            delete_number_tag(new_exclusion_labels.pop())
+            set_status(f"removed last exclusion "
+                       f"({len(new_exclusions)} new left)")
+            return
+        if kept_exclusions:
+            kept_exclusions.pop()
+            canvas.delete(kept_exclusion_outlines.pop())
+            delete_number_tag(kept_exclusion_labels.pop())
+            for tag in new_exclusion_labels:
+                canvas.delete(tag[0])
+                canvas.delete(tag[1])
+            del new_exclusion_labels[:]
+            for position, exclusion in enumerate(
+                    new_exclusions,
+                    start=len(kept_exclusions) + 1):
+                new_exclusion_labels.append(draw_number_tag(
+                    f"E{position}", "exclusion", exclusion["vertices"]))
+            set_status(
+                f"removed saved exclusion ({len(kept_exclusions)} saved "
+                "left); Finish will save the change")
+            return
+        set_status("nothing to undo")
+
     def switch_chip(chip_name):
         nonlocal current_chip_name
         current_chip_name = chip_name
@@ -770,7 +1055,121 @@ def annotate_area(chips, existing=None):
             else "Auto-close: off")
         set_status("auto-close on" if auto_close_enabled else "auto-close off")
 
+    def current_area_state():
+        return (list(kept_existing) + list(new_polygons),
+                list(kept_exclusions) + list(new_exclusions))
+
+    def show_preview_dialog(counts, preview_rgb, confirm_mode):
+        dialog = tk.Toplevel(root)
+        dialog.title("Completion preview"
+                     if not confirm_mode else "Confirm completion")
+        lines = [
+            f"water: {counts.get('water', 0)}",
+            f"non-water: {counts.get('non-water', 0)}",
+            f"unusable/masked: {counts.get('unusable', 0)}",
+            f"unreviewed/withheld: {counts.get('withheld', 0)}",
+        ]
+        tk.Label(dialog, text="\n".join(lines), anchor="w").pack(
+            padx=8, pady=6)
+        try:
+            preview_image = Image.fromarray(preview_rgb)
+            preview_photo = ImageTk.PhotoImage(preview_image)
+            preview_label = tk.Label(dialog, image=preview_photo)
+            preview_label.image = preview_photo
+            preview_label.pack(padx=8, pady=6)
+        except Exception:
+            pass
+        decision = {"confirmed": False}
+
+        def on_confirm():
+            decision["confirmed"] = True
+            dialog.destroy()
+
+        def on_cancel():
+            dialog.destroy()
+
+        if confirm_mode:
+            tk.Button(dialog, text="Confirm completion",
+                      command=on_confirm).pack(side="left", padx=4, pady=6)
+            tk.Button(dialog, text="Cancel",
+                      command=on_cancel).pack(side="left", padx=4, pady=6)
+        else:
+            tk.Button(dialog, text="Close",
+                      command=on_cancel).pack(padx=4, pady=6)
+        dialog.transient(root)
+        dialog.grab_set()
+        root.wait_window(dialog)
+        return decision["confirmed"]
+
+    def run_preview(confirm_mode):
+        if preview_provider is None:
+            set_status("preview unavailable: "
+                       + (completion_reason or "no feature preview"))
+            return False
+        polygons_now, exclusions_now = current_area_state()
+        try:
+            counts, preview_rgb = preview_provider(
+                polygons_now, exclusions_now)
+        except Exception as exc:
+            set_status(f"preview failed: {exc}")
+            return False
+        if not confirm_mode:
+            show_preview_dialog(counts, preview_rgb, False)
+            set_status("preview closed; back to editing, nothing written")
+            return False
+        confirmed = show_preview_dialog(counts, preview_rgb, True)
+        return confirmed
+
+    def preview_footprint():
+        run_preview(False)
+
+    def complete_area():
+        if not completion_enabled:
+            set_status("completion unavailable: "
+                       + (completion_reason or "features not ready"))
+            return
+        if run_preview(True):
+            chosen_action["name"] = "complete"
+            root.destroy()
+        else:
+            set_status("completion cancelled; back to editing, "
+                       "nothing written")
+
+    def reopen_area():
+        if not reopen_enabled:
+            set_status("no completion decision to remove")
+            return
+        dialog = tk.Toplevel(root)
+        dialog.title("Remove completion")
+        tk.Label(
+            dialog,
+            text=("Remove the completion decision? Polygons and "
+                  "exclusions are kept."),
+            anchor="w").pack(padx=8, pady=6)
+        decision = {"confirmed": False}
+
+        def on_confirm():
+            decision["confirmed"] = True
+            dialog.destroy()
+
+        def on_cancel():
+            dialog.destroy()
+
+        tk.Button(dialog, text="Remove completion",
+                  command=on_confirm).pack(side="left", padx=4, pady=6)
+        tk.Button(dialog, text="Cancel",
+                  command=on_cancel).pack(side="left", padx=4, pady=6)
+        dialog.transient(root)
+        dialog.grab_set()
+        root.wait_window(dialog)
+        if decision["confirmed"]:
+            chosen_action["name"] = "reopen"
+            root.destroy()
+        else:
+            set_status("reopen cancelled; back to editing, nothing written")
+
     def finish_labelling():
+        chosen_action["name"] = "finish"
         root.destroy()
 
     canvas.bind("<ButtonPress-1>", on_click)
@@ -792,13 +1191,24 @@ def annotate_area(chips, existing=None):
     tk.Button(buttons, text="Close as non-water",
               command=lambda: close_as("non-water")).pack(
                   side=tk.LEFT, padx=4)
+    tk.Button(buttons, text="Close as exclusion",
+              command=lambda: close_as("exclusion")).pack(
+                  side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Undo point", command=undo_point).pack(
         side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Undo polygon", command=undo_last_polygon).pack(
         side=tk.LEFT, padx=4)
+    tk.Button(buttons, text="Undo exclusion",
+              command=undo_last_exclusion).pack(side=tk.LEFT, padx=4)
     auto_close_button = tk.Button(
         buttons, text="Auto-close: on", command=toggle_auto_close)
     auto_close_button.pack(side=tk.LEFT, padx=4)
+    tk.Button(buttons, text="Preview",
+              command=preview_footprint).pack(side=tk.LEFT, padx=4)
+    tk.Button(buttons, text="Complete area",
+              command=complete_area).pack(side=tk.LEFT, padx=4)
+    tk.Button(buttons, text="Reopen area",
+              command=reopen_area).pack(side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Finish", command=finish_labelling).pack(
         side=tk.LEFT, padx=4, expand=True, fill=tk.X)
 
@@ -813,9 +1223,31 @@ def annotate_area(chips, existing=None):
     source_label = tk.Label(root, text=source_note, anchor=tk.W)
     source_label.pack(fill=tk.X, padx=2)
 
+    completion_text = completion_status
+    if not completion_enabled and completion_reason:
+        completion_text = (completion_text + " — " + completion_reason
+                           if completion_text else completion_reason)
+    completion_label = tk.Label(root, text=completion_text, anchor=tk.W)
+    completion_label.pack(fill=tk.X, padx=2)
+
     status_label = tk.Label(root, text="", bd=1, relief=tk.SUNKEN, anchor=tk.W)
     status_label.pack(fill=tk.X, padx=2, pady=2)
     set_status("click polygon vertices; flip dates to check stability")
     root.protocol("WM_DELETE_WINDOW", finish_labelling)
     root.mainloop()
-    return new_polygons, kept_existing
+    return (new_polygons, kept_existing, new_exclusions, kept_exclusions,
+            chosen_action["name"])
+
+
+def annotate_area(chips, existing=None):
+    """Draw polygons while switching between the composite and dated chips.
+
+    Saved polygons are shown with their 1-based list number in a small
+    class-coloured tag above the top edge, and can be removed with Undo,
+    newest first.
+    Return (new_polygons, kept_existing): polygons drawn this session and
+    the loaded polygons left after any undo. Finish saves kept + new.
+    """
+    reviewed = annotate_reviewed_area(chips, existing, None, "", False,
+                                      "", False, None)
+    return reviewed[0], reviewed[1]

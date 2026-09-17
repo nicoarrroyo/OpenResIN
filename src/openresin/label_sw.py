@@ -410,8 +410,7 @@ def _load_saved_polygons(path, row_offset, col_offset):
     if not os.path.isfile(path):
         return []
 
-    with open(path, encoding="utf-8") as handle:
-        saved = json.load(handle)
+    saved = sw.load_area_record(path)
 
     area_polygons = []
     for polygon in saved["polygons"]:
@@ -426,6 +425,25 @@ def _load_saved_polygons(path, row_offset, col_offset):
             "vertices": area_vertices,
         })
     return area_polygons
+
+
+def _load_saved_exclusions(path, row_offset, col_offset):
+    """Load exclusion scene coordinates as area coordinates."""
+    if not os.path.isfile(path):
+        return []
+
+    saved = sw.load_area_record(path)
+
+    area_exclusions = []
+    for exclusion in saved.get("exclusions", []):
+        area_vertices = []
+        for scene_x, scene_y in exclusion["vertices_scene"]:
+            area_vertices.append([
+                scene_x - col_offset,
+                scene_y - row_offset,
+            ])
+        area_exclusions.append({"vertices": area_vertices})
+    return area_exclusions
 
 
 def _move_polygons_to_scene(polygons, row_offset, col_offset):
@@ -445,30 +463,322 @@ def _move_polygons_to_scene(polygons, row_offset, col_offset):
     return scene_polygons
 
 
+def _move_exclusions_to_scene(exclusions, row_offset, col_offset):
+    """Convert exclusion vertices from area to scene coordinates."""
+    scene_exclusions = []
+    for exclusion in exclusions:
+        scene_vertices = []
+        for area_x, area_y in exclusion["vertices"]:
+            scene_vertices.append([
+                area_x + col_offset,
+                area_y + row_offset,
+            ])
+        scene_exclusions.append({"vertices_scene": scene_vertices})
+    return scene_exclusions
+
+
+LABEL_UNUSABLE = 0
+LABEL_WITHHELD = 1
+LABEL_WATER = 2
+LABEL_NONWATER = 3
+
+
+def compute_feature_digests(out_dir):
+    """Stream the monthly archive digests; return (features, provenance, error)."""
+    features_path = os.path.join(out_dir, "features.npz")
+    provenance_path = os.path.join(out_dir, "features-provenance.json")
+    if not os.path.isfile(features_path):
+        return None, None, f"absent: no {features_path}"
+    if not os.path.isfile(provenance_path):
+        return None, None, f"absent: no {provenance_path}"
+    try:
+        features_digest = sw.file_sha256(features_path)
+        provenance_digest = sw.file_sha256(provenance_path)
+    except OSError as exc:
+        return None, None, f"unreadable features: {exc}"
+    return features_digest, provenance_digest, None
+
+
+def check_completion_available(out_dir, month, tile, scenes, window):
+    """Check the saved archive can support a completion decision."""
+    cell, reason = _load_masked_ndwi_window(
+        out_dir, month, tile, scenes, window)
+    if cell is None:
+        return False, reason
+    features_path = os.path.join(out_dir, "features.npz")
+    try:
+        with np.load(features_path) as archive:
+            for name in c.SW_FEATURES:
+                if name not in archive:
+                    return False, f"corrupt: no {name} in {features_path}"
+                array = archive[name]
+                expected_shape = (c.SW_TILE_PX, c.SW_TILE_PX)
+                if array.shape != expected_shape:
+                    return False, (f"wrong-shape: {name} is {array.shape}, "
+                                   f"expected {expected_shape}")
+    except (OSError, ValueError, KeyError) as exc:
+        return False, f"corrupt: cannot read features: {exc}"
+    return True, "saved features match the selected month and scenes"
+
+
+def load_final_features_window(out_dir, window):
+    """Read the six final feature arrays cropped to one area window."""
+    row0, row1, col0, col1 = (int(window[0]), int(window[1]),
+                              int(window[2]), int(window[3]))
+    features_path = os.path.join(out_dir, "features.npz")
+    try:
+        with np.load(features_path) as archive:
+            cropped = {}
+            for name in c.SW_FEATURES:
+                if name not in archive:
+                    raise ValueError(f"no {name} in {features_path}")
+                full_tile = archive[name]
+                expected_shape = (c.SW_TILE_PX, c.SW_TILE_PX)
+                if full_tile.shape != expected_shape:
+                    raise ValueError(f"{name} is {full_tile.shape}, "
+                                     f"expected {expected_shape}")
+                cropped[name] = full_tile[row0:row1, col0:col1].astype(
+                    np.float32)
+    except (OSError, ValueError, KeyError) as exc:
+        raise ValueError(f"cannot read final features: {exc}") from exc
+    return cropped
+
+
+def check_completion_active(record, expected_month, expected_tile,
+                             expected_area_id, expected_split,
+                             expected_window, features_sha256,
+                             provenance_sha256):
+    """Report whether a stored completion decision is still active."""
+    completion = record.get("completion")
+    if completion is None:
+        return "incomplete", "no completion decision", False
+    if completion.get("schema_version") != sw.AREA_COMPLETION_SCHEMA_VERSION:
+        return ("stale",
+                f"unsupported schema_version "
+                f"{completion.get('schema_version')!r}", False)
+    if completion.get("month") != expected_month:
+        return ("stale",
+                f"month {completion.get('month')!r} != "
+                f"{expected_month!r}", False)
+    if record.get("tile") != expected_tile:
+        return ("stale",
+                f"tile {record.get('tile')!r} != {expected_tile!r}", False)
+    if record.get("area_id") != expected_area_id:
+        return ("stale",
+                f"area_id {record.get('area_id')!r} != "
+                f"{expected_area_id!r}", False)
+    if record.get("split") != expected_split:
+        return ("stale",
+                f"split {record.get('split')!r} != {expected_split!r}", False)
+    if list(record.get("window", [])) != list(expected_window):
+        return ("stale",
+                f"window {record.get('window')!r} != "
+                f"{list(expected_window)!r}", False)
+    if features_sha256 is None or provenance_sha256 is None:
+        return "stale", "saved features are unavailable", False
+    if completion.get("features_sha256") != features_sha256:
+        return "stale", "features archive changed since completion", False
+    if completion.get("features_provenance_sha256") != provenance_sha256:
+        return "stale", "features provenance changed since completion", False
+    current_digest = sw.annotations_digest(
+        record["tile"], record["area_id"], record["split"],
+        record["window"], record["polygons"],
+        record.get("exclusions", []))
+    if completion.get("annotations_sha256") != current_digest:
+        return "stale", "annotations changed since completion", False
+    return "complete", f"complete for {expected_month}", True
+
+
+def derive_area_label_state(record, features_window, window,
+                             completion_active):
+    """Derive the reusable four-state label mask for one area.
+
+    Returns (mask, counts, info) with codes unusable 0, withheld 1, water 2
+    and non-water 3. Validity comes from the final six-feature vector: every
+    required feature must be finite. Exclusions take precedence over both
+    explicit classes and derived background. Water/non-water overlaps raise.
+    """
+    sw.validate_area_record(record)
+    if list(record.get("window", [])) != list(window):
+        raise ValueError(f"window {record.get('window')!r} does not match "
+                         f"the selected {list(window)!r}")
+    height = int(window[1]) - int(window[0])
+    width = int(window[3]) - int(window[2])
+    for name in c.SW_FEATURES:
+        if name not in features_window:
+            raise ValueError(f"features are missing {name}")
+        if features_window[name].shape != (height, width):
+            raise ValueError(f"{name} window is "
+                             f"{features_window[name].shape}, expected "
+                             f"{(height, width)}")
+
+    valid = np.ones((height, width), dtype=bool)
+    for name in c.SW_FEATURES:
+        valid &= np.isfinite(features_window[name])
+
+    water_entries = []
+    nonwater_entries = []
+    for polygon in record.get("polygons", []):
+        entry = {"vertices_scene": polygon["vertices_scene"]}
+        if polygon["class"] == "water":
+            water_entries.append(entry)
+        else:
+            nonwater_entries.append(entry)
+    exclusion_entries = [
+        {"vertices_scene": exclusion["vertices_scene"]}
+        for exclusion in record.get("exclusions", [])]
+
+    water_mask = sw.rasterize_scene_polygons(water_entries, window)
+    nonwater_mask = sw.rasterize_scene_polygons(nonwater_entries, window)
+    exclusion_mask = sw.rasterize_scene_polygons(exclusion_entries, window)
+
+    overlap = water_mask & nonwater_mask
+    if overlap.any():
+        raise ValueError(f"water and non-water polygons overlap on "
+                         f"{int(overlap.sum())} pixels; fix the drawings "
+                         "instead of choosing silently")
+
+    water_final = water_mask & valid & ~exclusion_mask
+    if completion_active:
+        nonwater_final = valid & ~exclusion_mask & ~water_mask
+        withheld_mask = valid & exclusion_mask
+    else:
+        nonwater_final = nonwater_mask & valid & ~exclusion_mask
+        withheld_mask = valid & ~water_final & ~nonwater_final
+
+    mask = np.full((height, width), LABEL_WITHHELD, dtype=np.uint8)
+    mask[~valid] = LABEL_UNUSABLE
+    mask[water_final] = LABEL_WATER
+    mask[nonwater_final] = LABEL_NONWATER
+    # Excluded valid pixels stay withheld even after completion; invalid
+    # pixels under any polygon stay unusable because validity wins.
+    mask[withheld_mask & ~water_final & ~nonwater_final] = LABEL_WITHHELD
+
+    counts = {
+        "water": int((mask == LABEL_WATER).sum()),
+        "non-water": int((mask == LABEL_NONWATER).sum()),
+        "unusable": int((mask == LABEL_UNUSABLE).sum()),
+        "withheld": int((mask == LABEL_WITHHELD).sum()),
+    }
+    info = {
+        "area_id": record["area_id"],
+        "split": record["split"],
+        "completion_active": bool(completion_active),
+        "window": list(window),
+    }
+    return mask, counts, info
+
+
+def label_state_preview_image(mask):
+    """Colour a four-state mask for the completion preview dialog."""
+    preview = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
+    preview[mask == LABEL_UNUSABLE] = (0, 0, 0)
+    preview[mask == LABEL_WITHHELD] = (128, 128, 128)
+    preview[mask == LABEL_WATER] = (30, 144, 255)
+    preview[mask == LABEL_NONWATER] = (255, 140, 0)
+    return preview
+
+
 def _annotate_grid_area(out_dir, scenes, area_id, month):
-    """Open one grid area, then save kept plus newly drawn polygons."""
+    """Review one grid area with an explicit completion decision."""
+    if not sw.COMPLETION_MONTH_RE.match(month):
+        print(f"bad month: {month!r}, expected YYYY-MM")
+        return 2
     window = sw.grid_cell_window(area_id)
     row_start, _, col_start, _ = window
     default_tile = _scene_tile(scenes[0])
     tile, split = _lookup_area_tile_and_split(
         out_dir, area_id, default_tile)
+    polygons_path = os.path.join(out_dir, f"area-{area_id:03d}.json")
+
+    try:
+        existing_record = None
+        if os.path.isfile(polygons_path):
+            existing_record = sw.load_area_record(polygons_path)
+            if existing_record["area_id"] != area_id:
+                print(f"bad record: {polygons_path} holds area "
+                      f"{existing_record['area_id']}, not {area_id}")
+                return 2
+    except ValueError as exc:
+        print(f"bad record: {exc}")
+        return 2
+
+    features_digest, provenance_digest, digest_error = \
+        compute_feature_digests(out_dir)
+    available, availability_reason = check_completion_available(
+        out_dir, month, tile, scenes, window)
+    if digest_error is not None:
+        available = False
+        availability_reason = digest_error
+    features_window = None
+    if available:
+        try:
+            features_window = load_final_features_window(out_dir, window)
+        except ValueError as exc:
+            available = False
+            availability_reason = str(exc)
+
+    if existing_record is None:
+        status_name = "incomplete"
+        status_reason = "no saved area file yet"
+    else:
+        status_name, status_reason, _ = check_completion_active(
+            existing_record, month, tile, area_id, split,
+            list(window), features_digest, provenance_digest)
+    if status_name == "complete":
+        status_text = f"complete for {month}"
+    elif status_name == "stale":
+        status_text = f"stale: {status_reason}"
+    else:
+        status_text = f"incomplete — {status_reason}"
+    reopen_enabled = (
+        existing_record is not None
+        and existing_record.get("completion") is not None)
 
     display_chips = _prepare_annotation_chips(
         scenes, window, out_dir, month, tile)
-    polygons_path = os.path.join(out_dir, f"area-{area_id:03d}.json")
     saved_polygons = _load_saved_polygons(
+        polygons_path, row_start, col_start)
+    saved_exclusions = _load_saved_exclusions(
         polygons_path, row_start, col_start)
     if saved_polygons:
         print(f"  resuming with {len(saved_polygons)} saved polygons")
+    if saved_exclusions:
+        print(f"  resuming with {len(saved_exclusions)} saved exclusions")
+    print(f"  area status: {status_text}")
+    if not available:
+        print(f"  completion unavailable: {availability_reason}")
+
+    def preview_provider(polygons_area, exclusions_area):
+        if features_window is None:
+            raise ValueError(availability_reason)
+        scene_polygons = _move_polygons_to_scene(
+            polygons_area, row_start, col_start)
+        scene_exclusions = _move_exclusions_to_scene(
+            exclusions_area, row_start, col_start)
+        preview_record = {
+            "tile": tile, "area_id": area_id, "split": split,
+            "window": list(window), "polygons": scene_polygons,
+            "exclusions": scene_exclusions,
+        }
+        preview_mask, preview_counts, _ = derive_area_label_state(
+            preview_record, features_window, list(window), True)
+        return preview_counts, label_state_preview_image(preview_mask)
 
     _print_step(7, "annotating")
     print(f"  cell {area_id} ({split}); "
           "close the window or press Finish when done")
-    new_polygons, kept_polygons = sw.annotate_area(
-        display_chips, saved_polygons)
+    (new_polygons, kept_polygons, new_exclusions, kept_exclusions,
+     action) = sw.annotate_reviewed_area(
+        display_chips, saved_polygons, saved_exclusions, status_text,
+        available, availability_reason if not available else "",
+        reopen_enabled, preview_provider if available else None)
     removed = len(saved_polygons) - len(kept_polygons)
     if removed:
         print(f"  removed {removed} saved polygon(s) via Undo")
+    removed_exclusions = len(saved_exclusions) - len(kept_exclusions)
+    if removed_exclusions:
+        print(f"  removed {removed_exclusions} saved exclusion(s) via Undo")
 
     all_area_polygons = kept_polygons + new_polygons
     scene_polygons = _move_polygons_to_scene(
@@ -476,15 +786,91 @@ def _annotate_grid_area(out_dir, scenes, area_id, month):
     numbered_polygons = []
     for polygon_number, polygon in enumerate(scene_polygons, start=1):
         numbered_polygons.append({"id": polygon_number, **polygon})
+    all_area_exclusions = kept_exclusions + new_exclusions
+    scene_exclusions = _move_exclusions_to_scene(
+        all_area_exclusions, row_start, col_start)
 
-    sw.save_polygons(
-        polygons_path,
-        tile,
-        area_id,
-        split,
-        window,
-        numbered_polygons)
-    print(f"  saved {len(numbered_polygons)} polygons to {polygons_path}")
+    if existing_record is not None:
+        old_digest = sw.annotations_digest(
+            existing_record["tile"], existing_record["area_id"],
+            existing_record["split"], existing_record["window"],
+            existing_record["polygons"],
+            existing_record.get("exclusions", []))
+    else:
+        old_digest = None
+    new_digest = sw.annotations_digest(
+        tile, area_id, split, list(window),
+        numbered_polygons, scene_exclusions)
+    edited = (old_digest != new_digest)
+
+    def build_record(completion):
+        record = {"tile": tile, "area_id": area_id, "split": split,
+                  "window": list(window), "polygons": numbered_polygons,
+                  "exclusions": scene_exclusions}
+        if completion is not None:
+            record["completion"] = completion
+        elif existing_record is None and not scene_exclusions:
+            record.pop("exclusions")
+        return record
+
+    if action == "reopen":
+        try:
+            sw.save_area_record(
+                polygons_path, build_record(None))
+        except ValueError as exc:
+            print(f"bad record: {exc}")
+            return 2
+        print(f"  removed completion; kept {len(numbered_polygons)} "
+              f"polygons and {len(scene_exclusions)} exclusions "
+              f"in {polygons_path}")
+        return 0
+
+    if action == "complete":
+        fresh_features, fresh_provenance, fresh_error = \
+            compute_feature_digests(out_dir)
+        fresh_available, fresh_reason = check_completion_available(
+            out_dir, month, tile, scenes, window)
+        if fresh_error is not None:
+            fresh_available = False
+            fresh_reason = fresh_error
+        if not fresh_available:
+            print(f"  completion refused: {fresh_reason}; "
+                  "edits are kept without completion")
+            try:
+                sw.save_area_record(
+                    polygons_path, build_record(None))
+            except ValueError as exc:
+                print(f"bad record: {exc}")
+                return 2
+            return 2
+        completion = {
+            "schema_version": sw.AREA_COMPLETION_SCHEMA_VERSION,
+            "month": month,
+            "features_sha256": fresh_features,
+            "features_provenance_sha256": fresh_provenance,
+            "annotations_sha256": new_digest,
+        }
+        try:
+            sw.save_area_record(
+                polygons_path, build_record(completion))
+        except ValueError as exc:
+            print(f"bad record: {exc}")
+            return 2
+        print(f"  completed area {area_id} for {month}: "
+              f"{len(numbered_polygons)} polygons, "
+              f"{len(scene_exclusions)} exclusions")
+        return 0
+
+    if existing_record is not None and not edited:
+        print(f"  no changes; {status_text}, nothing written")
+        return 0
+    try:
+        sw.save_area_record(polygons_path, build_record(None))
+    except ValueError as exc:
+        print(f"bad record: {exc}")
+        return 2
+    print(f"  saved {len(numbered_polygons)} polygons and "
+          f"{len(scene_exclusions)} exclusions to {polygons_path}")
     return 0
 
 

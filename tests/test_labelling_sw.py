@@ -913,3 +913,238 @@ def test_mask_known_features_skips_missing_files(capsys):
     assert "skipping sea masking" in out
     assert "skipping urban masking" in out
     assert (arrays["B04"] == 1).all()
+
+
+def _area_record_polygons():
+    return [
+        {"id": 1, "class": "water",
+         "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+        {"id": 2, "class": "non-water",
+         "vertices_scene": [[2, 2], [4, 2], [4, 4], [2, 4]]},
+    ]
+
+
+def test_annotations_digest_ignores_ids_and_completion():
+    """Display ids and the stored decision do not affect the revision."""
+    polygons = _area_record_polygons()
+    exclusions = [{"vertices_scene": [[0, 3], [1, 3], [1, 4]]}]
+    first = sw.annotations_digest(
+        "T31UCU", 1, "train", [0, 4, 0, 4], polygons, exclusions)
+    renumbered = [
+        {"id": 9, "class": "water",
+         "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+        {"id": 3, "class": "non-water",
+         "vertices_scene": [[2, 2], [4, 2], [4, 4], [2, 4]]},
+    ]
+    second = sw.annotations_digest(
+        "T31UCU", 1, "train", [0, 4, 0, 4], renumbered, exclusions)
+    assert first == second
+    assert len(first) == 64
+
+
+def test_annotations_digest_changes_on_geometry_or_order():
+    """Vertex moves, order swaps and exclusion edits force re-review."""
+    polygons = _area_record_polygons()
+    base = sw.annotations_digest(
+        "T31UCU", 1, "train", [0, 4, 0, 4], polygons, [])
+    moved = sw.annotations_digest(
+        "T31UCU", 1, "train", [0, 4, 0, 4],
+        [{"id": 1, "class": "water",
+          "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2.5]]},
+         polygons[1]], [])
+    swapped = sw.annotations_digest(
+        "T31UCU", 1, "train", [0, 4, 0, 4],
+        [polygons[1], polygons[0]], [])
+    excluded = sw.annotations_digest(
+        "T31UCU", 1, "train", [0, 4, 0, 4], polygons,
+        [{"vertices_scene": [[0, 3], [1, 3], [1, 4]]}])
+    assert moved != base
+    assert swapped != base
+    assert excluded != base
+
+
+def test_load_area_record_legacy_defaults(tmp_path):
+    """Legacy files without exclusions or completion stay incomplete."""
+    import json
+
+    path = str(tmp_path / "area-001.json")
+    legacy = {"tile": "T31UCU", "area_id": 1, "split": "train",
+              "window": [0, 4, 0, 4],
+              "polygons": _area_record_polygons()}
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(legacy, handle)
+    record = sw.load_area_record(path)
+    assert record["exclusions"] == []
+    assert "completion" not in record
+    assert record["polygons"] == legacy["polygons"]
+
+
+def test_load_area_record_rejects_malformed(tmp_path):
+    """Bad classes, vertices, exclusions and completions fail loudly."""
+    import json
+
+    bad_cases = [
+        {"tile": "T31UCU", "area_id": 1, "split": "train",
+         "window": [0, 4, 0, 4],
+         "polygons": [{"class": "cloud", "vertices_scene": [[0, 0]]}]},
+        {"tile": "T31UCU", "area_id": 1, "split": "train",
+         "window": [0, 4, 0, 4],
+         "polygons": [{"class": "water", "vertices_scene": [[0, 0]]}]},
+        {"tile": "T31UCU", "area_id": 1, "split": "train",
+         "window": [0, 4, 0, 4], "polygons": [],
+         "exclusions": [{"class": "water",
+                         "vertices_scene": [[0, 0], [1, 0], [1, 1]]}]},
+        {"tile": "T31UCU", "area_id": 1, "split": "train",
+         "window": [0, 4, 0, 4], "polygons": [],
+         "completion": {"schema_version": 1, "month": "April",
+                        "features_sha256": "x" * 64,
+                        "features_provenance_sha256": "y" * 64,
+                        "annotations_sha256": "z" * 64}},
+    ]
+    for number, bad in enumerate(bad_cases):
+        path = str(tmp_path / f"bad-{number}.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(bad, handle)
+        with pytest.raises(ValueError):
+            sw.load_area_record(path)
+
+
+def test_save_area_record_roundtrip_with_completion(tmp_path):
+    """Exclusions and the completion decision survive an atomic save."""
+    path = str(tmp_path / "area-001.json")
+    polygons = _area_record_polygons()
+    exclusions = [{"vertices_scene": [[0, 3], [1, 3], [1, 4]]}]
+    annotations = sw.annotations_digest(
+        "T31UCU", 1, "train", [0, 4, 0, 4], polygons, exclusions)
+    record = {"tile": "T31UCU", "area_id": 1, "split": "train",
+              "window": [0, 4, 0, 4], "polygons": polygons,
+              "exclusions": exclusions,
+              "completion": {"schema_version": 1, "month": "2026-04",
+                             "features_sha256": "a" * 64,
+                             "features_provenance_sha256": "b" * 64,
+                             "annotations_sha256": annotations}}
+    sw.save_area_record(path, record)
+    assert sw.load_area_record(path) == record
+    leftovers = [name for name in __import__("os").listdir(str(tmp_path))
+                 if name.startswith(".area-")]
+    assert leftovers == []
+
+
+def test_save_area_record_cleans_temp_on_failure(tmp_path, monkeypatch):
+    """A failed replace leaves the old file and no temporary file."""
+    import os
+
+    path = str(tmp_path / "area-001.json")
+    first = {"tile": "T31UCU", "area_id": 1, "split": "train",
+             "window": [0, 4, 0, 4], "polygons": []}
+    sw.save_area_record(path, first)
+
+    def fail_replace(_src, _dst):
+        raise OSError("disk is full")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    second = {"tile": "T31UCU", "area_id": 1, "split": "train",
+              "window": [0, 4, 0, 4],
+              "polygons": _area_record_polygons()}
+    with pytest.raises(OSError):
+        sw.save_area_record(path, second)
+    assert sw.load_area_record(path)["polygons"] == []
+    leftovers = [name for name in os.listdir(str(tmp_path))
+                 if name.startswith(".area-")]
+    assert leftovers == []
+
+
+def test_rasterize_clips_to_window_and_keeps_halves():
+    """Outside-window geometry is ignored; half-pixel edges are kept."""
+    window = [0, 4, 0, 4]
+    inside = [{"vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]}]
+    outside = [{"vertices_scene": [[10, 10], [12, 10], [12, 12], [10, 12]]}]
+    half = [{"vertices_scene": [[0.5, 0.5], [2.5, 0.5],
+                                [2.5, 2.5], [0.5, 2.5]]}]
+    inside_mask = sw.rasterize_scene_polygons(inside, window)
+    assert inside_mask.shape == (4, 4)
+    assert inside_mask[:2, :2].all()
+    assert not inside_mask[2:, 2:].any()
+    assert not sw.rasterize_scene_polygons(outside, window).any()
+    half_mask = sw.rasterize_scene_polygons(half, window)
+    assert half_mask.any()
+    assert not half_mask[3, 3]
+    assert sw.rasterize_scene_polygons([], window).shape == (4, 4)
+
+
+def test_annotate_reviewed_area_draws_exclusion(monkeypatch):
+    """The reviewed editor draws, numbers and undoes exclusions."""
+    button_commands = {}
+    canvas_bindings = {}
+    scroll_offset = 10
+    expected_scale = 4
+
+    root = MagicMock()
+    root.winfo_screenwidth.return_value = 1920
+    root.winfo_screenheight.return_value = 1080
+    canvas = MagicMock()
+    canvas.create_image.return_value = 17
+    canvas.canvasx.side_effect = lambda value: value + scroll_offset
+    canvas.canvasy.side_effect = lambda value: value + scroll_offset
+    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
+        seq, func)
+    root.bind.side_effect = lambda seq, func: None
+
+    def make_button(_parent, text, command):
+        button_commands[text] = command
+        return MagicMock()
+
+    fake_tk = SimpleNamespace(
+        Tk=lambda: root,
+        Canvas=lambda *_args, **_kwargs: canvas,
+        Frame=lambda *_args, **_kwargs: MagicMock(),
+        Button=make_button,
+        Label=lambda *_args, **_kwargs: MagicMock(),
+        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
+        TclError=Exception,
+        LEFT="left",
+        RIGHT="right",
+        BOTTOM="bottom",
+        X="x",
+        Y="y",
+        BOTH="both",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
+        SUNKEN="sunken",
+        W="w",
+    )
+    from PIL import ImageTk
+    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+
+    def click(image_x, image_y):
+        canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
+            x=image_x * expected_scale - scroll_offset,
+            y=image_y * expected_scale - scroll_offset))
+
+    def run_session():
+        for point in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
+            click(*point)
+        button_commands["Close as exclusion"]()
+        for point in [(10.0, 10.0), (12.0, 10.0), (10.0, 12.0)]:
+            click(*point)
+        button_commands["Close as water"]()
+
+    root.mainloop.side_effect = run_session
+    chips = {
+        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
+        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
+    }
+
+    (new_polygons, kept, new_exclusions, kept_exclusions,
+     action) = sw.annotate_reviewed_area(chips)
+    assert action == "finish"
+    assert new_polygons == [{
+        "class": "water",
+        "vertices": [[10.0, 10.0], [12.0, 10.0], [10.0, 12.0]],
+    }]
+    assert new_exclusions == [{
+        "vertices": [[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]],
+    }]
+    assert kept == []
+    assert kept_exclusions == []

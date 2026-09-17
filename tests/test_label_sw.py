@@ -249,3 +249,357 @@ def test_load_masked_ndwi_window_requires_both_masks_on_disk(
 
     assert cell is None
     assert "mask source is missing" in reason
+
+
+def _write_full_features(out_dir, scenes, values, sea_path, urban_path):
+    """Save all six features on a tiny tile with matching provenance."""
+    provenance = {
+        "tile": "T31UCU",
+        "month": "2026-04",
+        "source_scenes": sorted(os.path.basename(s) for s in scenes),
+        "feature_order": list(label_sw.c.SW_FEATURES),
+        "aggregation": "valid median within date, then median across dates",
+        "masks": {
+            "cloud_shadow_classes": list(
+                label_sw.c.SW_CLOUD_SHADOW_CLASSES),
+            "nodata_value": label_sw.c.SW_NODATA_VALUE,
+            "sea_source": sea_path,
+            "urban_source": urban_path,
+        },
+    }
+    arrays = {name: np.array(values, dtype=np.float32)
+              for name in label_sw.c.SW_FEATURES}
+    np.savez_compressed(os.path.join(out_dir, "features.npz"), **arrays)
+    with open(os.path.join(out_dir, "features-provenance.json"), "w",
+              encoding="utf-8") as handle:
+        json.dump(provenance, handle)
+    return provenance
+
+
+def _tiny_features_setup(tmp_path, monkeypatch, values=None):
+    """Fix a 4 px tile and save uniform valid features for fixtures."""
+    scenes = _tiny_tile_setup(tmp_path, monkeypatch)
+    if values is None:
+        values = np.ones((4, 4), dtype=np.float32)
+    _write_full_features(
+        str(tmp_path), scenes, values, "sea.geojson", "urban.tif")
+    return scenes
+
+
+def _area_record(window, polygons, exclusions=None, completion=None):
+    record = {"tile": "T31UCU", "area_id": 1, "split": "train",
+              "window": list(window), "polygons": polygons,
+              "exclusions": exclusions or []}
+    if completion is not None:
+        record["completion"] = completion
+    return record
+
+
+def test_derive_incomplete_uses_only_explicit_polygons(tmp_path, monkeypatch):
+    """Incomplete areas leave other usable pixels unreviewed, not non-water."""
+    monkeypatch.setattr(label_sw.c, "SW_TILE_PX", 4)
+    window = [0, 4, 0, 4]
+    features = {name: np.ones((4, 4), dtype=np.float32)
+                for name in label_sw.c.SW_FEATURES}
+    features["B02"][0, 0] = np.nan  # invalid even under the water polygon
+    record = _area_record(window, [
+        {"id": 1, "class": "water",
+         "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+        {"id": 2, "class": "non-water",
+         "vertices_scene": [[2, 2], [3, 2], [3, 3], [2, 3]]},
+    ])
+
+    mask, counts, info = label_sw.derive_area_label_state(
+        record, features, window, False)
+
+    assert mask[0, 0] == label_sw.LABEL_UNUSABLE
+    assert mask[0, 1] == label_sw.LABEL_WATER
+    assert mask[2, 2] == label_sw.LABEL_NONWATER
+    assert mask[3, 3] == label_sw.LABEL_WITHHELD
+    assert counts["water"] + counts["non-water"] + counts["unusable"] \
+        + counts["withheld"] == 16
+    assert info["completion_active"] is False
+    assert info["split"] == "train"
+
+
+def test_derive_complete_turns_background_to_nonwater(tmp_path, monkeypatch):
+    """A valid completion labels usable ground, but keeps exclusions back."""
+    monkeypatch.setattr(label_sw.c, "SW_TILE_PX", 4)
+    window = [0, 4, 0, 4]
+    features = {name: np.ones((4, 4), dtype=np.float32)
+                for name in label_sw.c.SW_FEATURES}
+    record = _area_record(window, [
+        {"id": 1, "class": "water",
+         "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+        {"id": 2, "class": "non-water",
+         "vertices_scene": [[3, 3], [4, 3], [4, 4], [3, 4]]},
+    ], exclusions=[
+        {"vertices_scene": [[0, 3], [1, 3], [1, 4], [0, 4]]},
+    ])
+
+    mask, counts, _ = label_sw.derive_area_label_state(
+        record, features, window, True)
+
+    assert mask[0, 1] == label_sw.LABEL_WATER
+    assert mask[3, 3] == label_sw.LABEL_NONWATER
+    assert mask[1, 3] == label_sw.LABEL_NONWATER
+    assert mask[3, 0] == label_sw.LABEL_WITHHELD
+    assert mask[0, 3] == label_sw.LABEL_NONWATER
+    assert counts["withheld"] == 1
+    assert counts["unusable"] == 0
+
+
+def test_derive_exclusion_beats_water_and_rejects_overlap(monkeypatch):
+    """Exclusions withhold even water pixels; class overlaps raise."""
+    monkeypatch.setattr(label_sw.c, "SW_TILE_PX", 4)
+    window = [0, 4, 0, 4]
+    features = {name: np.ones((4, 4), dtype=np.float32)
+                for name in label_sw.c.SW_FEATURES}
+    water = {"id": 1, "class": "water",
+             "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]}
+    excluded = _area_record(window, [water], exclusions=[
+        {"vertices_scene": [[0, 0], [1, 0], [1, 1], [0, 1]]}])
+    mask, _, _ = label_sw.derive_area_label_state(
+        excluded, features, window, True)
+    assert mask[0, 0] == label_sw.LABEL_WITHHELD
+    assert mask[0, 1] == label_sw.LABEL_WATER
+
+    clashing = _area_record(window, [
+        water,
+        {"id": 2, "class": "non-water",
+         "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+    ])
+    try:
+        label_sw.derive_area_label_state(clashing, features, window, False)
+    except ValueError as exc:
+        assert "overlap" in str(exc)
+    else:
+        raise AssertionError("expected an overlap error")
+
+
+def test_derive_uses_final_validity_not_valid_count(monkeypatch):
+    """A sea/urban-masked pixel with a positive count stays unusable."""
+    monkeypatch.setattr(label_sw.c, "SW_TILE_PX", 4)
+    window = [0, 4, 0, 4]
+    features = {name: np.ones((4, 4), dtype=np.float32)
+                for name in label_sw.c.SW_FEATURES}
+    features["NDVI"][1, 1] = np.nan  # post-mask gap after compositing
+    record = _area_record(window, [
+        {"id": 1, "class": "water",
+         "vertices_scene": [[0, 0], [4, 0], [4, 4], [0, 4]]},
+    ])
+
+    mask, counts, _ = label_sw.derive_area_label_state(
+        record, features, window, True)
+
+    assert mask[1, 1] == label_sw.LABEL_UNUSABLE
+    assert counts["unusable"] == 1
+    assert counts["water"] == 15
+
+
+def test_check_completion_reports_stale_reasons(tmp_path, monkeypatch):
+    """Month, archive, provenance and annotation edits each invalidate."""
+    scenes = _tiny_features_setup(tmp_path, monkeypatch)
+    features_digest, provenance_digest, _ = \
+        label_sw.compute_feature_digests(str(tmp_path))
+    window = [0, 4, 0, 4]
+    polygons = [{"id": 1, "class": "water",
+                 "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]}]
+    annotations = label_sw.sw.annotations_digest(
+        "T31UCU", 1, "train", window, polygons, [])
+    record = _area_record(window, polygons, [], {
+        "schema_version": 1, "month": "2026-04",
+        "features_sha256": features_digest,
+        "features_provenance_sha256": provenance_digest,
+        "annotations_sha256": annotations})
+
+    state, _, active = label_sw.check_completion_active(
+        record, "2026-04", "T31UCU", 1, "train", window,
+        features_digest, provenance_digest)
+    assert (state, active) == ("complete", True)
+
+    state, reason, active = label_sw.check_completion_active(
+        record, "2026-05", "T31UCU", 1, "train", window,
+        features_digest, provenance_digest)
+    assert state == "stale" and not active and "month" in reason
+
+    state, _, active = label_sw.check_completion_active(
+        record, "2026-04", "T31UCU", 1, "train", window,
+        "0" * 64, provenance_digest)
+    assert state == "stale" and not active
+
+    edited = _area_record(window, [
+        {"id": 1, "class": "water",
+         "vertices_scene": [[0, 0], [3, 0], [3, 3], [0, 3]]},
+    ], [], record["completion"])
+    state, reason, active = label_sw.check_completion_active(
+        edited, "2026-04", "T31UCU", 1, "train", window,
+        features_digest, provenance_digest)
+    assert state == "stale" and not active and "annotations" in reason
+
+    assert label_sw.check_completion_active(
+        _area_record(window, polygons), "2026-04", "T31UCU", 1,
+        "train", window, features_digest,
+        provenance_digest)[0] == "incomplete"
+
+
+def test_check_completion_available_needs_all_features(
+        tmp_path, monkeypatch):
+    """NDWI alone is not enough; every classifier feature must be readable."""
+    scenes = _tiny_tile_setup(tmp_path, monkeypatch)
+    _write_matching_archive(
+        str(tmp_path), scenes, np.ones((4, 4), dtype=np.float32),
+        "sea.geojson", "urban.tif")
+
+    available, reason = label_sw.check_completion_available(
+        str(tmp_path), "2026-04", "T31UCU", scenes, (0, 2, 0, 2))
+
+    assert available is False
+    assert "B02" in reason or "features" in reason
+
+
+def _annotate_setup(tmp_path, monkeypatch, polygons):
+    """Point the area workflow at a tiny out-dir with valid features."""
+    scenes = _tiny_features_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(label_sw.c, "SW_TILE_PX", 4)
+    monkeypatch.setattr(
+        label_sw.sw, "grid_cell_window", lambda _cell: (0, 4, 0, 4))
+    monkeypatch.setattr(
+        label_sw, "_lookup_area_tile_and_split",
+        lambda _out_dir, _cell, _tile: ("T31UCU", "train"))
+    monkeypatch.setattr(
+        label_sw, "_prepare_annotation_chips",
+        lambda _scenes, _window, _out_dir, _month, _tile: {
+            "composite": np.zeros((4, 4, 3), dtype=np.uint8)})
+    path = os.path.join(str(tmp_path), "area-001.json")
+    label_sw.sw.save_area_record(path, _area_record(
+        [0, 4, 0, 4], polygons))
+    return scenes, path
+
+
+def _area_polygons_in_editor_format(polygons_scene):
+    """Convert saved scene polygons to the editor's area format."""
+    converted = []
+    for polygon in polygons_scene:
+        converted.append({
+            "class": polygon["class"],
+            "vertices": [[x, y] for x, y in polygon["vertices_scene"]],
+        })
+    return converted
+
+
+def test_annotate_grid_area_finish_keeps_valid_completion(tmp_path,
+                                                          monkeypatch):
+    """A no-op Finish never rewrites the file or drops the decision."""
+    polygons = [{"id": 1, "class": "water",
+                 "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]}]
+    scenes, path = _annotate_setup(tmp_path, monkeypatch, polygons)
+    features_digest, provenance_digest, _ = \
+        label_sw.compute_feature_digests(str(tmp_path))
+    annotations = label_sw.sw.annotations_digest(
+        "T31UCU", 1, "train", [0, 4, 0, 4], polygons, [])
+    completed = _area_record([0, 4, 0, 4], polygons, [], {
+        "schema_version": 1, "month": "2026-04",
+        "features_sha256": features_digest,
+        "features_provenance_sha256": provenance_digest,
+        "annotations_sha256": annotations})
+    label_sw.sw.save_area_record(path, completed)
+    before = open(path, encoding="utf-8").read()
+    editor_polygons = _area_polygons_in_editor_format(polygons)
+    monkeypatch.setattr(
+        label_sw.sw, "annotate_reviewed_area",
+        lambda *args, **kwargs: ([], editor_polygons, [], [], "finish"))
+
+    result = label_sw._annotate_grid_area(
+        str(tmp_path), scenes, 1, "2026-04")
+
+    assert result == 0
+    assert open(path, encoding="utf-8").read() == before
+
+
+def test_annotate_grid_area_edit_drops_completion(tmp_path, monkeypatch):
+    """An actual polygon edit removes the decision but keeps the drawings."""
+    polygons = [{"id": 1, "class": "water",
+                 "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]}]
+    scenes, path = _annotate_setup(tmp_path, monkeypatch, polygons)
+    features_digest, provenance_digest, _ = \
+        label_sw.compute_feature_digests(str(tmp_path))
+    annotations = label_sw.sw.annotations_digest(
+        "T31UCU", 1, "train", [0, 4, 0, 4], polygons, [])
+    label_sw.sw.save_area_record(path, _area_record(
+        [0, 4, 0, 4], polygons, [], {
+            "schema_version": 1, "month": "2026-04",
+            "features_sha256": features_digest,
+            "features_provenance_sha256": provenance_digest,
+            "annotations_sha256": annotations}))
+    edited_scene = [[0, 0], [3, 0], [3, 3], [0, 3]]
+    monkeypatch.setattr(
+        label_sw.sw, "annotate_reviewed_area",
+        lambda *args, **kwargs: (
+            [], [{"class": "water",
+                  "vertices": [list(p) for p in edited_scene]}],
+            [], [], "finish"))
+
+    result = label_sw._annotate_grid_area(
+        str(tmp_path), scenes, 1, "2026-04")
+
+    assert result == 0
+    saved = label_sw.sw.load_area_record(path)
+    assert "completion" not in saved
+    assert saved["polygons"][0]["vertices_scene"] == edited_scene
+
+
+def test_annotate_grid_area_complete_and_reopen(tmp_path, monkeypatch):
+    """Complete records digests; Reopen removes the decision only."""
+    polygons = [{"id": 1, "class": "water",
+                 "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]}]
+    scenes, path = _annotate_setup(tmp_path, monkeypatch, polygons)
+    editor_polygons = _area_polygons_in_editor_format(polygons)
+    monkeypatch.setattr(
+        label_sw.sw, "annotate_reviewed_area",
+        lambda *args, **kwargs: ([], editor_polygons, [], [], "complete"))
+
+    assert label_sw._annotate_grid_area(
+        str(tmp_path), scenes, 1, "2026-04") == 0
+    completed = label_sw.sw.load_area_record(path)
+    assert completed["completion"]["month"] == "2026-04"
+    assert completed["polygons"] == polygons
+    features_digest, provenance_digest, _ = \
+        label_sw.compute_feature_digests(str(tmp_path))
+    assert completed["completion"]["features_sha256"] == features_digest
+    assert completed["completion"]["features_provenance_sha256"] == \
+        provenance_digest
+
+    monkeypatch.setattr(
+        label_sw.sw, "annotate_reviewed_area",
+        lambda *args, **kwargs: ([], editor_polygons, [], [], "reopen"))
+    assert label_sw._annotate_grid_area(
+        str(tmp_path), scenes, 1, "2026-04") == 0
+    reopened = label_sw.sw.load_area_record(path)
+    assert "completion" not in reopened
+    assert reopened["polygons"] == polygons
+
+
+def test_annotate_grid_area_rejects_malformed_record(tmp_path, monkeypatch):
+    """A contradictory file is reported, never silently overwritten."""
+    scenes = _tiny_features_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(label_sw.c, "SW_TILE_PX", 4)
+    monkeypatch.setattr(
+        label_sw.sw, "grid_cell_window", lambda _cell: (0, 4, 0, 4))
+    monkeypatch.setattr(
+        label_sw, "_lookup_area_tile_and_split",
+        lambda _out_dir, _cell, _tile: ("T31UCU", "train"))
+    monkeypatch.setattr(
+        label_sw, "_prepare_annotation_chips",
+        lambda *_args, **_kwargs: {
+            "composite": np.zeros((4, 4, 3), dtype=np.uint8)})
+    path = os.path.join(str(tmp_path), "area-001.json")
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"tile": "T31UCU"}, handle)
+    before = open(path, encoding="utf-8").read()
+
+    result = label_sw._annotate_grid_area(
+        str(tmp_path), scenes, 1, "2026-04")
+
+    assert result == 2
+    assert open(path, encoding="utf-8").read() == before
