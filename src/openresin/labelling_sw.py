@@ -1180,37 +1180,52 @@ def annotate_reviewed_area(chips, existing=None, existing_exclusions=None,
 
     buttons = tk.Frame(root)
     buttons.pack(fill=tk.X, pady=6)
-    for chip_name in chip_names:
+    # Grouped grid: view | dates | close | undo | review | finish.
+    # View chips (composite, NDWI) stack in column 0; dated chips stack in
+    # column 1 starting at row 0, growing past row 2 when a month has
+    # extra dates. Actions sit in fixed rows 0-2; Finish spans all rows.
+    for position, chip_name in enumerate(chip_names[:2]):
         tk.Button(
             buttons,
             text=chip_name,
-            command=lambda name=chip_name: switch_chip(name)).pack(
-                side=tk.LEFT, padx=4)
+            command=lambda name=chip_name: switch_chip(name)).grid(
+                row=position, column=0, padx=4, pady=2, sticky="ew")
+    for position, chip_name in enumerate(chip_names[2:]):
+        tk.Button(
+            buttons,
+            text=chip_name,
+            command=lambda name=chip_name: switch_chip(name)).grid(
+                row=position, column=1, padx=4, pady=2, sticky="ew")
     tk.Button(buttons, text="Close as water",
-              command=lambda: close_as("water")).pack(side=tk.LEFT, padx=4)
+              command=lambda: close_as("water")).grid(
+                  row=0, column=2, padx=4, pady=2, sticky="ew")
     tk.Button(buttons, text="Close as non-water",
-              command=lambda: close_as("non-water")).pack(
-                  side=tk.LEFT, padx=4)
+              command=lambda: close_as("non-water")).grid(
+                  row=1, column=2, padx=4, pady=2, sticky="ew")
     tk.Button(buttons, text="Close as exclusion",
-              command=lambda: close_as("exclusion")).pack(
-                  side=tk.LEFT, padx=4)
-    tk.Button(buttons, text="Undo point", command=undo_point).pack(
-        side=tk.LEFT, padx=4)
-    tk.Button(buttons, text="Undo polygon", command=undo_last_polygon).pack(
-        side=tk.LEFT, padx=4)
+              command=lambda: close_as("exclusion")).grid(
+                  row=2, column=2, padx=4, pady=2, sticky="ew")
+    tk.Button(buttons, text="Undo point", command=undo_point).grid(
+        row=0, column=3, padx=4, pady=2, sticky="ew")
+    tk.Button(buttons, text="Undo polygon", command=undo_last_polygon).grid(
+        row=1, column=3, padx=4, pady=2, sticky="ew")
     tk.Button(buttons, text="Undo exclusion",
-              command=undo_last_exclusion).pack(side=tk.LEFT, padx=4)
+              command=undo_last_exclusion).grid(
+                  row=2, column=3, padx=4, pady=2, sticky="ew")
     auto_close_button = tk.Button(
         buttons, text="Auto-close: on", command=toggle_auto_close)
-    auto_close_button.pack(side=tk.LEFT, padx=4)
+    auto_close_button.grid(row=2, column=0, padx=4, pady=2, sticky="ew")
     tk.Button(buttons, text="Preview",
-              command=preview_footprint).pack(side=tk.LEFT, padx=4)
-    tk.Button(buttons, text="Complete area",
-              command=complete_area).pack(side=tk.LEFT, padx=4)
+              command=preview_footprint).grid(
+                  row=0, column=4, padx=4, pady=2, sticky="ew")
     tk.Button(buttons, text="Reopen area",
-              command=reopen_area).pack(side=tk.LEFT, padx=4)
-    tk.Button(buttons, text="Finish", command=finish_labelling).pack(
-        side=tk.LEFT, padx=4, expand=True, fill=tk.X)
+              command=reopen_area).grid(
+                  row=1, column=4, padx=4, pady=2, sticky="ew")
+    tk.Button(buttons, text="Complete area",
+              command=complete_area).grid(
+                  row=2, column=4, padx=4, pady=2, sticky="ew")
+    tk.Button(buttons, text="Finish", command=finish_labelling).grid(
+        row=0, column=5, rowspan=3, padx=4, pady=2, sticky="ns")
 
     if "NDWI (masked)" in chip_names:
         source_note = ("NDWI is masked (cloud, sea, urban); "
