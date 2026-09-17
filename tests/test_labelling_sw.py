@@ -431,6 +431,94 @@ def test_annotate_area_reuses_background_canvas_item(monkeypatch):
     assert kept == []
 
 
+def test_annotate_area_scale_floor_clips_canvas_to_viewport(monkeypatch):
+    """A 500 px cell on 1920x1080 floors to scale 2 with a clipped canvas."""
+    button_commands = {}
+    canvas_bindings = {}
+    root_bindings = {}
+    canvas_kwargs = {}
+    scroll_offset = 10
+    screen_width, screen_height = 1920, 1080
+
+    root = MagicMock()
+    root.winfo_screenwidth.return_value = screen_width
+    root.winfo_screenheight.return_value = screen_height
+    canvas = MagicMock()
+    canvas.create_image.return_value = 17
+    canvas.canvasx.side_effect = lambda value: value + scroll_offset
+    canvas.canvasy.side_effect = lambda value: value + scroll_offset
+    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
+        seq, func)
+    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
+        seq, func)
+
+    def make_button(_parent, text, command):
+        button_commands[text] = command
+        return MagicMock()
+
+    def make_canvas(*_args, **kwargs):
+        canvas_kwargs.update(kwargs)
+        return canvas
+
+    fake_tk = SimpleNamespace(
+        Tk=lambda: root,
+        Canvas=make_canvas,
+        Frame=lambda *_args, **_kwargs: MagicMock(),
+        Button=make_button,
+        Label=lambda *_args, **_kwargs: MagicMock(),
+        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
+        TclError=Exception,
+        LEFT="left",
+        RIGHT="right",
+        BOTTOM="bottom",
+        X="x",
+        Y="y",
+        BOTH="both",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
+        SUNKEN="sunken",
+        W="w",
+    )
+    from PIL import ImageTk
+    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+    chips = {
+        "composite": np.zeros((500, 500, 3), dtype=np.uint8),
+        "NDWI": np.ones((500, 500, 3), dtype=np.uint8),
+    }
+
+    # Pure fit is min(1800//500, 880//500) = 1, floored to 2. The scaled
+    # 1000x1000 image exceeds the 880 px viewport height, so the canvas
+    # clips to 1000x880 and scrolls.
+    expected_scale = 2
+    expected_scaled = 500 * expected_scale
+    expected_canvas_height = screen_height - 200
+
+    def run_session():
+        for image_x, image_y in [(10.0, 20.0), (30.0, 20.0), (30.0, 40.0)]:
+            canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
+                x=image_x * expected_scale - scroll_offset,
+                y=image_y * expected_scale - scroll_offset))
+        button_commands["Close as water"]()
+
+    root.mainloop.side_effect = run_session
+
+    new_polygons, kept = sw.annotate_area(chips)
+    scrollregions = [
+        call.kwargs.get("scrollregion")
+        for call in canvas.config.call_args_list
+        if "scrollregion" in call.kwargs
+    ]
+    assert (0, 0, expected_scaled, expected_scaled) in scrollregions
+    assert canvas_kwargs["width"] == expected_scaled
+    assert canvas_kwargs["height"] == expected_canvas_height
+    assert new_polygons == [{
+        "class": "water",
+        "vertices": [[10.0, 20.0], [30.0, 20.0], [30.0, 40.0]],
+    }]
+    assert kept == []
+
+
 def test_annotate_area_undo_last_polygon(monkeypatch):
     """Undo polygon drops the newest closed boundary and its outline."""
     button_commands = {}
@@ -718,6 +806,83 @@ def test_annotate_area_auto_close_toggle(monkeypatch):
                       [11.0, 11.0]]},
     ]
     assert kept == []
+
+
+def test_annotate_area_numbers_polygons_in_list_order(monkeypatch):
+    """Loaded and new polygons show 1-based list numbers; undo clears tags."""
+    button_commands = {}
+    canvas_bindings = {}
+    scroll_offset = 10
+    expected_scale = 4
+
+    root = MagicMock()
+    root.winfo_screenwidth.return_value = 1920
+    root.winfo_screenheight.return_value = 1080
+    canvas = MagicMock()
+    canvas.create_image.return_value = 17
+    canvas.canvasx.side_effect = lambda value: value + scroll_offset
+    canvas.canvasy.side_effect = lambda value: value + scroll_offset
+    canvas.create_polygon.side_effect = [301, 302]
+    canvas.create_rectangle.side_effect = [401, 402]
+    canvas.create_text.side_effect = [501, 502]
+    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
+        seq, func)
+    root.bind.side_effect = lambda seq, func: None
+
+    def make_button(_parent, text, command):
+        button_commands[text] = command
+        return MagicMock()
+
+    fake_tk = SimpleNamespace(
+        Tk=lambda: root,
+        Canvas=lambda *_args, **_kwargs: canvas,
+        Frame=lambda *_args, **_kwargs: MagicMock(),
+        Button=make_button,
+        Label=lambda *_args, **_kwargs: MagicMock(),
+        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
+        TclError=Exception,
+        LEFT="left",
+        RIGHT="right",
+        BOTTOM="bottom",
+        X="x",
+        Y="y",
+        BOTH="both",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
+        SUNKEN="sunken",
+        W="w",
+    )
+    from PIL import ImageTk
+    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+
+    def run_session():
+        for image_x, image_y in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
+            canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
+                x=image_x * expected_scale - scroll_offset,
+                y=image_y * expected_scale - scroll_offset))
+        button_commands["Close as water"]()
+        button_commands["Undo polygon"]()
+        button_commands["Undo polygon"]()
+
+    root.mainloop.side_effect = run_session
+    chips = {
+        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
+        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
+    }
+    existing = [{"class": "water",
+                 "vertices": [[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]}]
+
+    new_polygons, kept = sw.annotate_area(chips, existing)
+    assert new_polygons == []
+    assert kept == []
+    shown_numbers = [call.kwargs["text"]
+                     for call in canvas.create_text.call_args_list]
+    assert shown_numbers == ["1", "2"]
+    deleted = [call.args[0] for call in canvas.delete.call_args_list]
+    for item in (302, 402, 502, 301, 401, 501):
+        assert item in deleted
+    assert deleted.index(302) < deleted.index(301)
 
 
 def test_mask_scene_bands_masks_every_band():

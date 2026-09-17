@@ -476,7 +476,9 @@ def read_tci_window(scene_dir, window):
 def annotate_area(chips, existing=None):
     """Draw polygons while switching between the composite and dated chips.
 
-    Saved polygons are shown and can be removed with Undo, newest first.
+    Saved polygons are shown with their 1-based list number in a small
+    class-coloured tag above the top edge, and can be removed with Undo,
+    newest first.
     Return (new_polygons, kept_existing): polygons drawn this session and
     the loaded polygons left after any undo. Finish saves kept + new.
     """
@@ -536,8 +538,10 @@ def annotate_area(chips, existing=None):
 
     new_polygons = []
     polygon_outlines = []
+    new_labels = []
     kept_existing = list(existing or [])
     kept_outlines = []
+    kept_labels = []
     auto_close_enabled = True
     current_chip_name = chip_names[0]
     current_vertices = []
@@ -549,6 +553,14 @@ def annotate_area(chips, existing=None):
         "water": "dodgerblue",
         "non-water": "darkorange",
     }
+    # Small number tags: white digits on the class colour, offset above
+    # the polygon so the tag never covers the region itself.
+    label_font = ("TkDefaultFont", 9, "bold")
+    label_half_height = 8
+    label_pad_x = 4
+    label_digit_width = 7
+    label_y_offset = 10
+    label_edge_margin = 20
 
     def set_status(message):
         status_label.config(text=message)
@@ -566,9 +578,43 @@ def annotate_area(chips, existing=None):
             width=2,
             fill="")
 
-    for polygon in kept_existing:
+    def label_centre(vertices):
+        xs = [x for x, _ in vertices]
+        ys = [y for _, y in vertices]
+        centre_x = (min(xs) + max(xs)) / 2 * scale
+        centre_y = min(ys) * scale - label_y_offset
+        centre_x = min(max(centre_x, label_edge_margin),
+                       max(scaled_width - label_edge_margin,
+                           label_edge_margin))
+        centre_y = min(max(centre_y, label_half_height + 2),
+                       max(scaled_height - label_half_height - 2,
+                           label_half_height + 2))
+        return centre_x, centre_y
+
+    def draw_number_tag(number, polygon_class, vertices):
+        centre_x, centre_y = label_centre(vertices)
+        text = str(number)
+        half_width = len(text) * label_digit_width / 2 + label_pad_x
+        fill = colors_by_class.get(polygon_class, "gray20")
+        tag_box = canvas.create_rectangle(
+            centre_x - half_width, centre_y - label_half_height,
+            centre_x + half_width, centre_y + label_half_height,
+            fill=fill, outline="black")
+        tag_text = canvas.create_text(
+            centre_x, centre_y, text=text, fill="white",
+            font=label_font, anchor="center")
+        return (tag_box, tag_text)
+
+    def delete_number_tag(tag):
+        tag_box, tag_text = tag
+        canvas.delete(tag_box)
+        canvas.delete(tag_text)
+
+    for position, polygon in enumerate(kept_existing, start=1):
         kept_outlines.append(draw_polygon_outline(
             polygon["class"], polygon["vertices"]))
+        kept_labels.append(draw_number_tag(
+            position, polygon["class"], polygon["vertices"]))
 
     def redraw_preview(event=None):
         nonlocal preview_line
@@ -645,6 +691,9 @@ def annotate_area(chips, existing=None):
         })
         polygon_outlines.append(
             draw_polygon_outline(polygon_class, current_vertices))
+        position = len(kept_existing) + len(new_polygons)
+        new_labels.append(
+            draw_number_tag(position, polygon_class, vertices))
         clear_drawing()
 
         water_count = 0
@@ -672,6 +721,7 @@ def annotate_area(chips, existing=None):
         if new_polygons:
             new_polygons.pop()
             canvas.delete(polygon_outlines.pop())
+            delete_number_tag(new_labels.pop())
             water_count = 0
             for polygon in new_polygons:
                 if polygon["class"] == "water":
@@ -683,6 +733,15 @@ def annotate_area(chips, existing=None):
         if kept_existing:
             kept_existing.pop()
             canvas.delete(kept_outlines.pop())
+            delete_number_tag(kept_labels.pop())
+            for tag in new_labels:
+                canvas.delete(tag[0])
+                canvas.delete(tag[1])
+            del new_labels[:]
+            for position, polygon in enumerate(
+                    new_polygons, start=len(kept_existing) + 1):
+                new_labels.append(draw_number_tag(
+                    position, polygon["class"], polygon["vertices"]))
             set_status(
                 f"removed saved polygon ({len(kept_existing)} saved left); "
                 "Finish will save the change")
