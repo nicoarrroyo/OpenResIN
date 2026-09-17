@@ -118,36 +118,44 @@ def test_provenance_names_sources_and_settings():
 
 
 def test_validate_areas_accepts_separated_windows():
-    """Four training and two test cells, none touching across splits."""
-    assignment = sw.validate_areas([100, 102, 300, 302], [200, 400])
-    assert assignment == {"train": [100, 102, 300, 302],
-                          "test": [200, 400]}
+    """Eight training and four test cells, none touching across splits."""
+    train_ids = [100, 102, 104, 106, 300, 302, 304, 306]
+    test_ids = [200, 202, 400, 402]
+    assignment = sw.validate_areas(train_ids, test_ids)
+    assert assignment == {"train": train_ids, "test": test_ids}
 
 
 def test_validate_areas_rejects_wrong_counts():
-    """The design fixes the split at four training and two test areas."""
+    """The design fixes the split at eight training and four test areas."""
     with pytest.raises(ValueError):
-        sw.validate_areas([100, 102, 300], [200, 400])
+        sw.validate_areas([100, 102, 104, 106, 300, 302, 304],
+                          [200, 202, 400, 402])
     with pytest.raises(ValueError):
-        sw.validate_areas([100, 102, 300, 302], [200])
+        sw.validate_areas([100, 102, 104, 106, 300, 302, 304, 306],
+                          [200, 202, 400])
 
 
 def test_validate_areas_rejects_duplicates_and_neighbours():
     """One cell cannot serve twice, and a grid boundary is not
     independence: neighbouring opposite-split cells are rejected."""
     with pytest.raises(ValueError):
-        sw.validate_areas([100, 102, 300, 302], [100, 400])
+        sw.validate_areas([100, 102, 104, 106, 300, 302, 304, 306],
+                          [100, 202, 400, 402])
     with pytest.raises(ValueError):  # 101 neighbours 100, even diagonally
-        sw.validate_areas([100, 200, 300, 400], [101, 402])
+        sw.validate_areas([100, 102, 104, 106, 300, 302, 304, 306],
+                          [101, 202, 400, 402])
     with pytest.raises(ValueError):  # 122 is diagonal to 100
-        sw.validate_areas([100, 200, 300, 400], [122, 402])
+        sw.validate_areas([100, 102, 104, 106, 300, 302, 304, 306],
+                          [122, 202, 400, 402])
 
 
 def test_freeze_and_load_areas_roundtrip(tmp_path):
     """Frozen areas persist IDs, splits and 10 m windows."""
     path = str(tmp_path / "areas.json")
     record = sw.freeze_areas(
-        path, "T31UCU", {"train": [1, 2, 3, 4], "test": [10, 11]})
+        path, "T31UCU",
+        {"train": [1, 2, 3, 4, 5, 6, 7, 8],
+         "test": [100, 102, 104, 106]})
     assert sw.load_areas(path) == record
     first = record["areas"][0]
     assert (first["id"], first["split"]) == (1, "train")

@@ -369,18 +369,18 @@ def mask_known_features(arrays, meta, boundaries_path, urban_path):
 
 # %% 6. Validate and save the area split
 def validate_areas(train_ids, test_ids):
-    """Require four training and two test cells that do not touch, even diagonally."""
+    """Require eight training and four test cells separated across splits."""
     n_cells = c.SW_GRID_ROWS * c.SW_GRID_COLS
-    if len(train_ids) != 4 or len(test_ids) != 2:
-        raise ValueError("need exactly 4 training and 2 test areas, got "
+    if len(train_ids) != 8 or len(test_ids) != 4:
+        raise ValueError("need exactly 8 training and 4 test areas, got "
                          f"{len(train_ids)} and {len(test_ids)}")
     for cell_id in list(train_ids) + list(test_ids):
         if not isinstance(cell_id, (int, np.integer)) \
                 or not 1 <= cell_id <= n_cells:
             raise ValueError(f"area id must be an integer 1-{n_cells}, "
                              f"got {cell_id!r}")
-    if len(set(train_ids) | set(test_ids)) != 6:
-        raise ValueError("training and test areas must be six distinct cells")
+    if len(set(train_ids) | set(test_ids)) != 12:
+        raise ValueError("training and test areas must be 12 distinct cells")
 
     def neighbours(cell_id):
         row, col = divmod(int(cell_id) - 1, c.SW_GRID_COLS)

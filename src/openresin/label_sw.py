@@ -17,7 +17,7 @@ def build_parser():
         prog="openresin-label-sw",
         description=("Build monthly water/non-water features and draw "
                      "label polygons. Usual order: build the features, "
-                     "inspect the overview, annotate the six chosen cells, "
+                     "inspect the overview, annotate the 12 chosen cells, "
                      "then freeze their training/test split."))
 
     parser.add_argument(
@@ -31,11 +31,11 @@ def build_parser():
         "--device", default=c.SW_OCM_DEVICE, choices=("cuda", "cpu"),
         help="OmniCloudMask inference device (default: %(default)s)")
     parser.add_argument(
-        "--train-areas", type=int, nargs=4, default=None, metavar="CELL",
-        help="four training area IDs (1-484); requires --test-areas")
+        "--train-areas", type=int, nargs=8, default=None, metavar="CELL",
+        help="eight training area IDs (1-484); requires --test-areas")
     parser.add_argument(
-        "--test-areas", type=int, nargs=2, default=None, metavar="CELL",
-        help="two test area IDs (1-484); cannot touch training cells, "
+        "--test-areas", type=int, nargs=4, default=None, metavar="CELL",
+        help="four test area IDs (1-484); cannot touch training cells, "
              "including diagonally")
     parser.add_argument(
         "--annotate", type=int, default=None, metavar="CELL",
