@@ -718,6 +718,7 @@ def annotate_area(chips, existing=None):
     canvas.bind("<Motion>", redraw_preview)
     root.bind("<Tab>", lambda _event: toggle_composite_ndwi())
     root.bind("<Escape>", lambda _event: cancel_shape())
+    root.bind("<Shift_L>", lambda _event: toggle_auto_close())
 
     buttons = tk.Frame(root)
     buttons.pack(fill=tk.X, pady=6)
