@@ -399,7 +399,7 @@ def test_annotate_area_reuses_background_canvas_item(monkeypatch):
             event_y = image_y * expected_scale - scroll_offset
             canvas_bindings["<ButtonPress-1>"](
                 SimpleNamespace(x=event_x, y=event_y))
-        root_bindings["w"](SimpleNamespace())
+        button_commands["Close as water"]()
 
     root.mainloop.side_effect = run_session
 
@@ -480,10 +480,10 @@ def test_annotate_area_undo_last_polygon(monkeypatch):
         button_commands["Undo polygon"]()
         for point in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
             click(*point)
-        root_bindings["w"](SimpleNamespace())
+        button_commands["Close as water"]()
         for point in [(10.0, 10.0), (12.0, 10.0), (10.0, 12.0)]:
             click(*point)
-        root_bindings["n"](SimpleNamespace())
+        button_commands["Close as non-water"]()
         button_commands["Undo polygon"]()
 
     root.mainloop.side_effect = run_session
@@ -499,7 +499,6 @@ def test_annotate_area_undo_last_polygon(monkeypatch):
     }]
     assert kept == []
     canvas.delete.assert_any_call(102)
-    assert "u" in root_bindings
 
 
 def test_annotate_area_undo_saved_polygon(monkeypatch):
@@ -555,7 +554,7 @@ def test_annotate_area_undo_saved_polygon(monkeypatch):
             canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
                 x=image_x * expected_scale - scroll_offset,
                 y=image_y * expected_scale - scroll_offset))
-        root_bindings["w"](SimpleNamespace())
+        button_commands["Close as water"]()
         button_commands["Undo polygon"]()
         button_commands["Undo polygon"]()
 
@@ -573,6 +572,144 @@ def test_annotate_area_undo_saved_polygon(monkeypatch):
     assert len(existing) == 1
     deleted = [call.args[0] for call in canvas.delete.call_args_list]
     assert deleted.index(302) < deleted.index(301)
+
+
+def test_annotate_area_tab_toggles_composite_and_ndwi(monkeypatch):
+    """Tab flips between the composite and NDWI chips, in order."""
+    button_commands = {}
+    root_bindings = {}
+
+    root = MagicMock()
+    root.winfo_screenwidth.return_value = 1920
+    root.winfo_screenheight.return_value = 1080
+    canvas = MagicMock()
+    canvas.create_image.return_value = 17
+    canvas.bind.side_effect = lambda *args: None
+    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
+        seq, func)
+
+    def make_button(_parent, text, command):
+        button_commands[text] = command
+        return MagicMock()
+
+    fake_tk = SimpleNamespace(
+        Tk=lambda: root,
+        Canvas=lambda *_args, **_kwargs: canvas,
+        Frame=lambda *_args, **_kwargs: MagicMock(),
+        Button=make_button,
+        Label=lambda *_args, **_kwargs: MagicMock(),
+        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
+        TclError=Exception,
+        LEFT="left",
+        RIGHT="right",
+        BOTTOM="bottom",
+        X="x",
+        Y="y",
+        BOTH="both",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
+        SUNKEN="sunken",
+        W="w",
+    )
+    from PIL import ImageTk
+    monkeypatch.setattr(
+        ImageTk, "PhotoImage",
+        lambda image: float(np.mean(np.asarray(image))))
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+
+    def run_session():
+        root_bindings["<Tab>"](SimpleNamespace())
+        root_bindings["<Tab>"](SimpleNamespace())
+
+    root.mainloop.side_effect = run_session
+    chips = {
+        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
+        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
+    }
+
+    sw.annotate_area(chips)
+    shown = [call.kwargs["image"]
+             for call in canvas.itemconfig.call_args_list]
+    assert shown == [1.0, 0.0]
+
+
+def test_annotate_area_auto_close_toggle(monkeypatch):
+    """Auto-close defaults on; the button turns click-to-close off."""
+    button_commands = {}
+    canvas_bindings = {}
+    root_bindings = {}
+    scroll_offset = 10
+    expected_scale = 4
+
+    root = MagicMock()
+    root.winfo_screenwidth.return_value = 1920
+    root.winfo_screenheight.return_value = 1080
+    canvas = MagicMock()
+    canvas.create_image.return_value = 17
+    canvas.canvasx.side_effect = lambda value: value + scroll_offset
+    canvas.canvasy.side_effect = lambda value: value + scroll_offset
+    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
+        seq, func)
+    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
+        seq, func)
+
+    def make_button(_parent, text, command):
+        button_commands[text] = command
+        return MagicMock()
+
+    fake_tk = SimpleNamespace(
+        Tk=lambda: root,
+        Canvas=lambda *_args, **_kwargs: canvas,
+        Frame=lambda *_args, **_kwargs: MagicMock(),
+        Button=make_button,
+        Label=lambda *_args, **_kwargs: MagicMock(),
+        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
+        TclError=Exception,
+        LEFT="left",
+        RIGHT="right",
+        BOTTOM="bottom",
+        X="x",
+        Y="y",
+        BOTH="both",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
+        SUNKEN="sunken",
+        W="w",
+    )
+    from PIL import ImageTk
+    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+
+    def click(image_x, image_y):
+        canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
+            x=image_x * expected_scale - scroll_offset,
+            y=image_y * expected_scale - scroll_offset))
+
+    def run_session():
+        for point in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
+            click(*point)
+        click(5.0, 5.0)
+        button_commands["Auto-close: on"]()
+        for point in [(10.0, 10.0), (12.0, 10.0), (10.0, 12.0)]:
+            click(*point)
+        click(11.0, 11.0)
+        button_commands["Close as non-water"]()
+
+    root.mainloop.side_effect = run_session
+    chips = {
+        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
+        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
+    }
+
+    new_polygons, kept = sw.annotate_area(chips)
+    assert new_polygons == [
+        {"class": "water",
+         "vertices": [[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]]},
+        {"class": "non-water",
+         "vertices": [[10.0, 10.0], [12.0, 10.0], [10.0, 12.0],
+                      [11.0, 11.0]]},
+    ]
+    assert kept == []
 
 
 def test_mask_scene_bands_masks_every_band():

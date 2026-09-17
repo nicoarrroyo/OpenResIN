@@ -538,6 +538,8 @@ def annotate_area(chips, existing=None):
     polygon_outlines = []
     kept_existing = list(existing or [])
     kept_outlines = []
+    auto_close_enabled = True
+    current_chip_name = chip_names[0]
     current_vertices = []
     vertex_markers = []
     edge_lines = []
@@ -588,7 +590,7 @@ def annotate_area(chips, existing=None):
     def on_click(event):
         display_x = canvas.canvasx(event.x)
         display_y = canvas.canvasy(event.y)
-        if current_vertices:
+        if current_vertices and auto_close_enabled:
             first_x, first_y = current_vertices[0]
             near_first_vertex = (
                 abs(display_x - first_x * scale)
@@ -616,7 +618,7 @@ def annotate_area(chips, existing=None):
                 fill="yellow",
                 width=2))
         set_status(f"{len(current_vertices)} vertices "
-                   "(w: close as water, n: close as non-water)")
+                    "(Close as water / non-water to close)")
 
     def clear_drawing():
         nonlocal preview_line
@@ -688,19 +690,34 @@ def annotate_area(chips, existing=None):
         set_status("nothing to undo")
 
     def switch_chip(chip_name):
+        nonlocal current_chip_name
+        current_chip_name = chip_name
         canvas.itemconfig(image_item, image=photo_images[chip_name])
         set_status(f"viewing {chip_name}; {len(new_polygons)} new polygons")
+
+    def toggle_composite_ndwi():
+        if len(chip_names) < 2:
+            return
+        if current_chip_name == chip_names[0]:
+            switch_chip(chip_names[1])
+        else:
+            switch_chip(chip_names[0])
+
+    def toggle_auto_close():
+        nonlocal auto_close_enabled
+        auto_close_enabled = not auto_close_enabled
+        auto_close_button.config(
+            text="Auto-close: on" if auto_close_enabled
+            else "Auto-close: off")
+        set_status("auto-close on" if auto_close_enabled else "auto-close off")
 
     def finish_labelling():
         root.destroy()
 
     canvas.bind("<ButtonPress-1>", on_click)
     canvas.bind("<Motion>", redraw_preview)
-    root.bind("w", lambda _event: close_as("water"))
-    root.bind("n", lambda _event: close_as("non-water"))
-    root.bind("u", lambda _event: undo_last_polygon())
+    root.bind("<Tab>", lambda _event: toggle_composite_ndwi())
     root.bind("<Escape>", lambda _event: cancel_shape())
-    root.bind("<BackSpace>", lambda _event: undo_point())
 
     buttons = tk.Frame(root)
     buttons.pack(fill=tk.X, pady=6)
@@ -719,6 +736,9 @@ def annotate_area(chips, existing=None):
         side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Undo polygon", command=undo_last_polygon).pack(
         side=tk.LEFT, padx=4)
+    auto_close_button = tk.Button(
+        buttons, text="Auto-close: on", command=toggle_auto_close)
+    auto_close_button.pack(side=tk.LEFT, padx=4)
     tk.Button(buttons, text="Finish", command=finish_labelling).pack(
         side=tk.LEFT, padx=4, expand=True, fill=tk.X)
 
