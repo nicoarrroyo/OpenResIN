@@ -326,25 +326,55 @@ def test_colorise_ndwi_resolves_weak_water_at_display_limits():
 
 
 def test_annotate_area_reuses_background_canvas_item(monkeypatch):
-    """Switching chips updates one background without covering polygons."""
+    """Enlarged view reuses one background and stores scrolled clicks in image pixels."""
     button_commands = {}
+    canvas_bindings = {}
+    root_bindings = {}
+    canvas_kwargs = {}
+    scrollbar_calls = []
+    scroll_offset = 10
+    screen_width, screen_height = 1920, 1080
+
     root = MagicMock()
+    root.winfo_screenwidth.return_value = screen_width
+    root.winfo_screenheight.return_value = screen_height
     canvas = MagicMock()
     canvas.create_image.return_value = 17
-    root.mainloop.side_effect = lambda: button_commands["NDWI"]()
+    canvas.canvasx.side_effect = lambda value: value + scroll_offset
+    canvas.canvasy.side_effect = lambda value: value + scroll_offset
+    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
+        seq, func)
+    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
+        seq, func)
 
     def make_button(_parent, text, command):
         button_commands[text] = command
         return MagicMock()
 
+    def make_canvas(*_args, **kwargs):
+        canvas_kwargs.update(kwargs)
+        return canvas
+
+    def make_scrollbar(*args, **kwargs):
+        scrollbar_calls.append((args, kwargs))
+        return MagicMock()
+
     fake_tk = SimpleNamespace(
         Tk=lambda: root,
-        Canvas=lambda *_args, **_kwargs: canvas,
+        Canvas=make_canvas,
         Frame=lambda *_args, **_kwargs: MagicMock(),
         Button=make_button,
         Label=lambda *_args, **_kwargs: MagicMock(),
+        Scrollbar=make_scrollbar,
+        TclError=Exception,
         LEFT="left",
+        RIGHT="right",
+        BOTTOM="bottom",
         X="x",
+        Y="y",
+        BOTH="both",
+        HORIZONTAL="horizontal",
+        VERTICAL="vertical",
         SUNKEN="sunken",
         W="w",
     )
@@ -356,9 +386,40 @@ def test_annotate_area_reuses_background_canvas_item(monkeypatch):
         "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
     }
 
-    assert sw.annotate_area(chips) == []
+    # Tiny 2x2 chips on 1920x1080 fit far above the cap, so scale is 4
+    # and the scaled 8x8 canvas fits the viewport without scrolling.
+    expected_scale = 4
+    expected_scaled = 2 * expected_scale
+
+    def run_session():
+        button_commands["NDWI"]()
+        wanted_image = [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]
+        for image_x, image_y in wanted_image:
+            event_x = image_x * expected_scale - scroll_offset
+            event_y = image_y * expected_scale - scroll_offset
+            canvas_bindings["<ButtonPress-1>"](
+                SimpleNamespace(x=event_x, y=event_y))
+        root_bindings["w"](SimpleNamespace())
+
+    root.mainloop.side_effect = run_session
+
+    result = sw.annotate_area(chips)
     assert canvas.create_image.call_count == 1
     canvas.itemconfig.assert_called_once_with(17, image=ANY)
+    root.state.assert_called_with("zoomed")
+    scrollregions = [
+        call.kwargs.get("scrollregion")
+        for call in canvas.config.call_args_list
+        if "scrollregion" in call.kwargs
+    ]
+    assert (0, 0, expected_scaled, expected_scaled) in scrollregions
+    assert canvas_kwargs["width"] == expected_scaled
+    assert canvas_kwargs["height"] == expected_scaled
+    assert len(scrollbar_calls) == 2
+    assert result == [{
+        "class": "water",
+        "vertices": [[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]],
+    }]
 
 
 def test_mask_scene_bands_masks_every_band():

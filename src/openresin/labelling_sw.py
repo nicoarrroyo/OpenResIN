@@ -484,16 +484,52 @@ def annotate_area(chips, existing=None):
 
     chip_names = list(chips.keys())
     height, width = chips[chip_names[0]].shape[:2]
-    closing_distance = 8
+
+    # Display margins leave room for decorations, buttons, and labels.
+    WIDTH_MARGIN = 120
+    HEIGHT_MARGIN = 200
 
     root = tk.Tk()
     root.title("Draw water and non-water polygons")
-    canvas = tk.Canvas(root, width=width, height=height)
-    canvas.pack()
+    try:
+        root.state("zoomed")
+    except tk.TclError:
+        pass
+
+    # Auto-fit integer enlarge: sharp NEAREST pixels, at least 2x, scroll if needed.
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    fit_width = (screen_width - WIDTH_MARGIN) // width
+    fit_height = (screen_height - HEIGHT_MARGIN) // height
+    scale = min(fit_width, fit_height)
+    scale = max(2, min(scale, 4))
+
+    scaled_width = width * scale
+    scaled_height = height * scale
+    viewport_width = screen_width - WIDTH_MARGIN
+    viewport_height = screen_height - HEIGHT_MARGIN
+    canvas_width = min(scaled_width, viewport_width)
+    canvas_height = min(scaled_height, viewport_height)
+    closing_distance_display = 8 * scale
+
+    canvas_frame = tk.Frame(root)
+    canvas_frame.pack(expand=True, fill=tk.BOTH)
+    canvas = tk.Canvas(canvas_frame, width=canvas_width, height=canvas_height)
+    horizontal_scroll = tk.Scrollbar(
+        canvas_frame, orient=tk.HORIZONTAL, command=canvas.xview)
+    vertical_scroll = tk.Scrollbar(
+        canvas_frame, orient=tk.VERTICAL, command=canvas.yview)
+    canvas.config(xscrollcommand=horizontal_scroll.set,
+                  yscrollcommand=vertical_scroll.set)
+    canvas.config(scrollregion=(0, 0, scaled_width, scaled_height))
+    horizontal_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+    vertical_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+    canvas.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
     photo_images = {}
     for chip_name in chip_names:
-        photo_images[chip_name] = ImageTk.PhotoImage(
-            Image.fromarray(chips[chip_name]))
+        enlarged = Image.fromarray(chips[chip_name]).resize(
+            (scaled_width, scaled_height), Image.NEAREST)
+        photo_images[chip_name] = ImageTk.PhotoImage(enlarged)
     image_item = canvas.create_image(
         0, 0, anchor="nw", image=photo_images[chip_names[0]])
 
@@ -514,7 +550,7 @@ def annotate_area(chips, existing=None):
     def flatten_vertices(vertices):
         coordinates = []
         for x, y in vertices:
-            coordinates.extend((x, y))
+            coordinates.extend((x * scale, y * scale))
         return coordinates
 
     def draw_polygon_outline(polygon_class, vertices):
@@ -534,36 +570,44 @@ def annotate_area(chips, existing=None):
             preview_line = None
         if current_vertices and event is not None:
             previous_x, previous_y = current_vertices[-1]
+            cursor_x = canvas.canvasx(event.x)
+            cursor_y = canvas.canvasy(event.y)
             preview_line = canvas.create_line(
-                previous_x,
-                previous_y,
-                event.x,
-                event.y,
+                previous_x * scale,
+                previous_y * scale,
+                cursor_x,
+                cursor_y,
                 fill="yellow",
                 dash=(4, 2))
 
     def on_click(event):
+        display_x = canvas.canvasx(event.x)
+        display_y = canvas.canvasy(event.y)
         if current_vertices:
             first_x, first_y = current_vertices[0]
             near_first_vertex = (
-                abs(event.x - first_x) <= closing_distance
-                and abs(event.y - first_y) <= closing_distance
+                abs(display_x - first_x * scale)
+                <= closing_distance_display
+                and abs(display_y - first_y * scale)
+                <= closing_distance_display
             )
             if near_first_vertex and len(current_vertices) >= 3:
                 close_as("water")
                 return
 
-        current_vertices.append((float(event.x), float(event.y)))
+        image_x = display_x / scale
+        image_y = display_y / scale
+        current_vertices.append((float(image_x), float(image_y)))
         vertex_markers.append(canvas.create_oval(
-            event.x - 2, event.y - 2, event.x + 2, event.y + 2,
+            display_x - 2, display_y - 2, display_x + 2, display_y + 2,
             fill="yellow", outline=""))
         if len(current_vertices) > 1:
             previous_x, previous_y = current_vertices[-2]
             edge_lines.append(canvas.create_line(
-                previous_x,
-                previous_y,
-                event.x,
-                event.y,
+                previous_x * scale,
+                previous_y * scale,
+                display_x,
+                display_y,
                 fill="yellow",
                 width=2))
         set_status(f"{len(current_vertices)} vertices "
