@@ -395,7 +395,7 @@ def _prepare_annotation_chips(scenes, window, out_dir, month, tile):
               "and urban masking, and the TCI chips are raw window reads")
 
     display_chips = {
-        "composite": composite,
+        "Composite": composite,
         ndwi_key: sw.colorise_ndwi(ndwi_composite),
         **median_chips_by_date,
     }

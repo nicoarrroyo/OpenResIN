@@ -81,8 +81,8 @@ def test_prepare_annotation_chips_adds_two_stage_ndwi_composite(
         scenes, (0, 2, 0, 2), str(tmp_path), "2026-04", "T31UCU")
 
     assert list(chips) == [
-        "composite", "NDWI (raw)", "20260427", "20260430"]
-    assert np.all(chips["composite"] == 60)
+        "Composite", "NDWI (raw)", "20260427", "20260430"]
+    assert np.all(chips["Composite"] == 60)
     assert np.all(chips["20260427"] == 20)
     assert np.all(chips["20260430"] == 100)
     assert chips["NDWI (raw)"].shape == (2, 2, 3)
@@ -145,7 +145,7 @@ def test_prepare_annotation_chips_prefers_masked_archive_ndwi(
     chips = label_sw._prepare_annotation_chips(
         scenes, (1, 3, 0, 2), str(tmp_path), "2026-04", "T31UCU")
 
-    assert list(chips)[:2] == ["composite", "NDWI (masked)"]
+    assert list(chips)[:2] == ["Composite", "NDWI (masked)"]
     expected = label_sw.sw.colorise_ndwi(ndwi[1:3, 0:2])
     assert np.array_equal(chips["NDWI (masked)"], expected)
     assert np.array_equal(chips["NDWI (masked)"][0, 1], [0, 0, 0])
@@ -470,7 +470,7 @@ def _annotate_setup(tmp_path, monkeypatch, polygons):
     monkeypatch.setattr(
         label_sw, "_prepare_annotation_chips",
         lambda _scenes, _window, _out_dir, _month, _tile: {
-            "composite": np.zeros((4, 4, 3), dtype=np.uint8)})
+            "Composite": np.zeros((4, 4, 3), dtype=np.uint8)})
     path = os.path.join(str(tmp_path), "area-001.json")
     label_sw.sw.save_area_record(path, _area_record(
         [0, 4, 0, 4], polygons))
@@ -592,7 +592,7 @@ def test_annotate_grid_area_rejects_malformed_record(tmp_path, monkeypatch):
     monkeypatch.setattr(
         label_sw, "_prepare_annotation_chips",
         lambda *_args, **_kwargs: {
-            "composite": np.zeros((4, 4, 3), dtype=np.uint8)})
+            "Composite": np.zeros((4, 4, 3), dtype=np.uint8)})
     path = os.path.join(str(tmp_path), "area-001.json")
     with open(path, "w", encoding="utf-8") as handle:
         json.dump({"tile": "T31UCU"}, handle)
