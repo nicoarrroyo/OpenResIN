@@ -12,6 +12,7 @@ Nothing in here is tracked by git except this README (see `.gitignore` in the re
 ```
 outputs/
 ├── chunks/         # Mini-chunk PNGs cut for prediction, one folder per scene
+├── label-water/    # Surface-water features, labels and prepared run folders
 ├── labels/         # Label coordinates from your own labelling sessions
 ├── patches/        # Segmented training images, one folder per class
 │   ├── land/
@@ -28,6 +29,12 @@ outputs/
 > The naming convention for the `.csv` file may change, but the code must (and would) be changed first / accordingly. 
 
 **Relationship to `data/seed-labels/`:** the repository ships with a hand-labelled seed file so that a fresh clone can produce training images without sitting through a labelling session first. The seed is copied here and appended to, but the original file is never edited, only read. This should preserve the idea that two different machines can clone the same repo and get the same results on the first run. 
+
+## `label-water/`
+
+`openresin-label-sw` writes the experimental monthly feature archive, frozen area split, and polygon records here. `openresin-train-sw prepare` reads those files without changing them and publishes a new run under a destination you choose, normally `outputs/label-water/runs/<run-id>/`.
+
+A prepared run contains `v1-train.npz`, `v1-test.npz`, `v1-sampling.json`, and `prepare-complete.json`. The manifest records input and dataset digests, feature and label meanings, sample provenance, fixed random-forest settings, package versions, and the source-derived grid reference. Do not edit a prepared run in place; use a new run ID if the inputs or implementation change. The current checkpoint prepares datasets only. Model fitting, held-out metrics, and GeoTIFF exports are not produced yet.
 
 ## `patches/`
 NALIRA's segmentation step cuts the labelled regions out of the NDWI array and saves them here as 8-bit greyscale PNGs, sorted into one folder per class: `reservoirs`, `water-bodies`, `land`, and `sea`. These are the images the model is trained on.

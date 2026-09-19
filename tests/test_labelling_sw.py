@@ -1,4 +1,3 @@
-import io
 import sys
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock
@@ -37,8 +36,8 @@ def _tci(value, shape=(2, 2)):
     return np.full((3,) + shape, value, dtype=np.float32)
 
 
-def test_same_day_median_averages_two_values():
-    """Two valid same-day acquisitions average, per the agreed operator."""
+def test_same_day_median_takes_median_of_two_values():
+    """Two valid same-day acquisitions take the median, per the agreed operator."""
     out, valid = sw.composite_scenes({"2026-04-27": [_tci(10.0), _tci(20.0)]})
     assert np.allclose(out, 15.0)
     assert valid.all()
@@ -192,8 +191,7 @@ def _feature_dicts(value):
 
 
 def test_monthly_features_median_and_count():
-    """Two same-day values average, the across-date median follows,
-    and the valid-date count tracks NaN dates."""
+    """Within-date medians feed the across-date median; counts track valid dates."""
     nan_dicts = _feature_dicts(np.nan)
     dated = {"2026-04-25": [nan_dicts],
              "2026-04-27": [_feature_dicts(10.0), _feature_dicts(20.0)],
@@ -203,59 +201,33 @@ def test_monthly_features_median_and_count():
     assert np.allclose(features["NDWI"], 57.5)
     assert (valid_count == 2).all()
 
+    # Skewed values distinguish median from mean: within-date medians
+    # are 2, 4 and 50, so the monthly median is 4 (a mean would give 34.33).
+    def _single(value):
+        from openresin import config as c
+        return {name: np.full((1, 1), value, dtype=np.float32)
+                for name in c.SW_FEATURES}
 
-def test_monthly_features_skips_single_acquisition_date_median(monkeypatch):
-    """Only repeated dates reach the date-level median calculation."""
-    real_nanmedian = np.nanmedian
-    stack_sizes = []
-
-    def record_stack_size(values, axis):
-        stack_sizes.append(values.shape[0])
-        return real_nanmedian(values, axis=axis)
-
-    monkeypatch.setattr(sw.np, "nanmedian", record_stack_size)
-    dated = {"2026-04-25": [_feature_dicts(10.0)],
-             "2026-04-27": [_feature_dicts(20.0), _feature_dicts(30.0)],
-             "2026-04-30": [_feature_dicts(40.0)]}
-
-    sw.monthly_features(dated)
-
-    feature_count = len(_feature_dicts(0.0))
-    assert stack_sizes == [2] * feature_count + [3] * feature_count
+    skewed = {"2026-04-25": [_single(1.0), _single(2.0), _single(100.0)],
+              "2026-04-27": [_single(4.0)],
+              "2026-04-30": [_single(50.0)]}
+    skewed_features, skewed_count = sw.monthly_features(skewed)
+    assert np.allclose(skewed_features["B04"], 4.0)
+    assert np.allclose(skewed_features["NDWI"], 4.0)
+    assert (skewed_count == 3).all()
 
 
-def test_monthly_features_keeps_redirected_output_minimal(capsys):
-    """Redirected output contains one durable completion message."""
+def test_monthly_features_redirected_output_has_no_terminal_escapes(capsys):
+    """Redirected progress stays plain text without terminal control codes."""
     dated = {"2026-04-25": [_feature_dicts(10.0)],
              "2026-04-30": [_feature_dicts(20.0)]}
 
     sw.monthly_features(dated)
 
-    assert capsys.readouterr().out == "  medians complete\n"
-
-
-def test_monthly_features_rewrites_progress_in_interactive_terminal(
-        monkeypatch):
-    """Interactive feature progress occupies one line per median phase."""
-    class InteractiveOutput(io.StringIO):
-        def isatty(self):
-            return True
-
-    terminal = InteractiveOutput()
-    monkeypatch.setattr("sys.stdout", terminal)
-    dated = {"2026-04-25": [_feature_dicts(10.0)],
-             "2026-04-27": [_feature_dicts(20.0), _feature_dicts(30.0)],
-             "2026-04-30": [_feature_dicts(40.0)]}
-
-    sw.monthly_features(dated)
-
-    output = terminal.getvalue()
-    assert "\r\033[K  date median | 2026-04-27 | NDVI" in output
-    assert "date median | 2026-04-25" not in output
-    assert "date median | 2026-04-30" not in output
-    assert "\r\033[K  monthly median | NDVI" in output
-    assert output.endswith("\r\033[K  medians complete\n")
-    assert output.count("\n") == 1
+    out = capsys.readouterr().out
+    assert out
+    assert "\r" not in out
+    assert "\x1b" not in out
 
 
 def test_scene_indices_inherit_nodata():
@@ -333,23 +305,34 @@ def test_colorise_ndwi_resolves_weak_water_at_display_limits():
     assert np.array_equal(rgb[0, 3], rgb[0, 5])
 
 
-def test_annotate_area_reuses_background_canvas_item(monkeypatch):
-    """Enlarged view reuses one background and stores scrolled clicks in image pixels."""
+def _install_fake_tk(monkeypatch, photo_factory=None, polygon_ids=None,
+                     rectangle_ids=None, text_ids=None):
+    """Share the repeated fake-Tk scaffolding for annotator tests.
+
+    Each test keeps its own session script and result assertions; this only
+    removes the duplicated root/canvas/button construction. Callers that need
+    fixed canvas item numbers pass them explicitly.
+    """
     button_commands = {}
     canvas_bindings = {}
     root_bindings = {}
     canvas_kwargs = {}
     scrollbar_calls = []
     scroll_offset = 10
-    screen_width, screen_height = 1920, 1080
 
     root = MagicMock()
-    root.winfo_screenwidth.return_value = screen_width
-    root.winfo_screenheight.return_value = screen_height
+    root.winfo_screenwidth.return_value = 1920
+    root.winfo_screenheight.return_value = 1080
     canvas = MagicMock()
     canvas.create_image.return_value = 17
     canvas.canvasx.side_effect = lambda value: value + scroll_offset
     canvas.canvasy.side_effect = lambda value: value + scroll_offset
+    if polygon_ids is not None:
+        canvas.create_polygon.side_effect = polygon_ids
+    if rectangle_ids is not None:
+        canvas.create_rectangle.side_effect = rectangle_ids
+    if text_ids is not None:
+        canvas.create_text.side_effect = text_ids
     canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
         seq, func)
     root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
@@ -387,12 +370,31 @@ def test_annotate_area_reuses_background_canvas_item(monkeypatch):
         W="w",
     )
     from PIL import ImageTk
-    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
+    monkeypatch.setattr(
+        ImageTk, "PhotoImage", photo_factory or (lambda _image: object()))
     monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
-    chips = {
-        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
-        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
+    return SimpleNamespace(
+        root=root, canvas=canvas, button_commands=button_commands,
+        canvas_bindings=canvas_bindings, root_bindings=root_bindings,
+        canvas_kwargs=canvas_kwargs, scrollbar_calls=scrollbar_calls,
+        scroll_offset=scroll_offset)
+
+
+def _tiny_chips(rows=2, cols=2):
+    return {
+        "composite": np.zeros((rows, cols, 3), dtype=np.uint8),
+        "NDWI": np.ones((rows, cols, 3), dtype=np.uint8),
     }
+
+
+def test_annotate_area_reuses_background_canvas_item(monkeypatch):
+    """Enlarged view reuses one background and stores scrolled clicks in image pixels."""
+    gui = _install_fake_tk(monkeypatch)
+    root, canvas = gui.root, gui.canvas
+    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
+    canvas_kwargs, scrollbar_calls = gui.canvas_kwargs, gui.scrollbar_calls
+    scroll_offset = gui.scroll_offset
+    chips = _tiny_chips()
 
     # Tiny 2x2 chips on 1920x1080 fit far above the cap, so scale is 4
     # and the scaled 8x8 canvas fits the viewport without scrolling.
@@ -433,55 +435,11 @@ def test_annotate_area_reuses_background_canvas_item(monkeypatch):
 
 def test_annotate_area_scale_floor_clips_canvas_to_viewport(monkeypatch):
     """A 500 px cell on 1920x1080 floors to scale 2 with a clipped canvas."""
-    button_commands = {}
-    canvas_bindings = {}
-    root_bindings = {}
-    canvas_kwargs = {}
-    scroll_offset = 10
-    screen_width, screen_height = 1920, 1080
-
-    root = MagicMock()
-    root.winfo_screenwidth.return_value = screen_width
-    root.winfo_screenheight.return_value = screen_height
-    canvas = MagicMock()
-    canvas.create_image.return_value = 17
-    canvas.canvasx.side_effect = lambda value: value + scroll_offset
-    canvas.canvasy.side_effect = lambda value: value + scroll_offset
-    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
-        seq, func)
-    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
-        seq, func)
-
-    def make_button(_parent, text, command):
-        button_commands[text] = command
-        return MagicMock()
-
-    def make_canvas(*_args, **kwargs):
-        canvas_kwargs.update(kwargs)
-        return canvas
-
-    fake_tk = SimpleNamespace(
-        Tk=lambda: root,
-        Canvas=make_canvas,
-        Frame=lambda *_args, **_kwargs: MagicMock(),
-        Button=make_button,
-        Label=lambda *_args, **_kwargs: MagicMock(),
-        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
-        TclError=Exception,
-        LEFT="left",
-        RIGHT="right",
-        BOTTOM="bottom",
-        X="x",
-        Y="y",
-        BOTH="both",
-        HORIZONTAL="horizontal",
-        VERTICAL="vertical",
-        SUNKEN="sunken",
-        W="w",
-    )
-    from PIL import ImageTk
-    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+    gui = _install_fake_tk(monkeypatch)
+    root, canvas = gui.root, gui.canvas
+    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
+    canvas_kwargs = gui.canvas_kwargs
+    scroll_offset = gui.scroll_offset
     chips = {
         "composite": np.zeros((500, 500, 3), dtype=np.uint8),
         "NDWI": np.ones((500, 500, 3), dtype=np.uint8),
@@ -492,7 +450,7 @@ def test_annotate_area_scale_floor_clips_canvas_to_viewport(monkeypatch):
     # clips to 1000x880 and scrolls.
     expected_scale = 2
     expected_scaled = 500 * expected_scale
-    expected_canvas_height = screen_height - 200
+    expected_canvas_height = 1080 - 200
 
     def run_session():
         for image_x, image_y in [(10.0, 20.0), (30.0, 20.0), (30.0, 40.0)]:
@@ -521,51 +479,11 @@ def test_annotate_area_scale_floor_clips_canvas_to_viewport(monkeypatch):
 
 def test_annotate_area_undo_last_polygon(monkeypatch):
     """Undo polygon drops the newest closed boundary and its outline."""
-    button_commands = {}
-    canvas_bindings = {}
-    root_bindings = {}
-    scroll_offset = 10
+    gui = _install_fake_tk(monkeypatch, polygon_ids=[101, 102])
+    root, canvas = gui.root, gui.canvas
+    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
+    scroll_offset = gui.scroll_offset
     expected_scale = 4
-
-    root = MagicMock()
-    root.winfo_screenwidth.return_value = 1920
-    root.winfo_screenheight.return_value = 1080
-    canvas = MagicMock()
-    canvas.create_image.return_value = 17
-    canvas.canvasx.side_effect = lambda value: value + scroll_offset
-    canvas.canvasy.side_effect = lambda value: value + scroll_offset
-    canvas.create_polygon.side_effect = [101, 102]
-    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
-        seq, func)
-    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
-        seq, func)
-
-    def make_button(_parent, text, command):
-        button_commands[text] = command
-        return MagicMock()
-
-    fake_tk = SimpleNamespace(
-        Tk=lambda: root,
-        Canvas=lambda *_args, **_kwargs: canvas,
-        Frame=lambda *_args, **_kwargs: MagicMock(),
-        Button=make_button,
-        Label=lambda *_args, **_kwargs: MagicMock(),
-        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
-        TclError=Exception,
-        LEFT="left",
-        RIGHT="right",
-        BOTTOM="bottom",
-        X="x",
-        Y="y",
-        BOTH="both",
-        HORIZONTAL="horizontal",
-        VERTICAL="vertical",
-        SUNKEN="sunken",
-        W="w",
-    )
-    from PIL import ImageTk
-    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
 
     def click(image_x, image_y):
         canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
@@ -583,10 +501,7 @@ def test_annotate_area_undo_last_polygon(monkeypatch):
         button_commands["Undo polygon"]()
 
     root.mainloop.side_effect = run_session
-    chips = {
-        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
-        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
-    }
+    chips = _tiny_chips()
 
     new_polygons, kept = sw.annotate_area(chips)
     assert new_polygons == [{
@@ -599,51 +514,11 @@ def test_annotate_area_undo_last_polygon(monkeypatch):
 
 def test_annotate_area_undo_saved_polygon(monkeypatch):
     """Undo after reopen drops the session polygon first, then the saved one."""
-    button_commands = {}
-    canvas_bindings = {}
-    root_bindings = {}
-    scroll_offset = 10
+    gui = _install_fake_tk(monkeypatch, polygon_ids=[301, 302])
+    root, canvas = gui.root, gui.canvas
+    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
+    scroll_offset = gui.scroll_offset
     expected_scale = 4
-
-    root = MagicMock()
-    root.winfo_screenwidth.return_value = 1920
-    root.winfo_screenheight.return_value = 1080
-    canvas = MagicMock()
-    canvas.create_image.return_value = 17
-    canvas.canvasx.side_effect = lambda value: value + scroll_offset
-    canvas.canvasy.side_effect = lambda value: value + scroll_offset
-    canvas.create_polygon.side_effect = [301, 302]
-    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
-        seq, func)
-    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
-        seq, func)
-
-    def make_button(_parent, text, command):
-        button_commands[text] = command
-        return MagicMock()
-
-    fake_tk = SimpleNamespace(
-        Tk=lambda: root,
-        Canvas=lambda *_args, **_kwargs: canvas,
-        Frame=lambda *_args, **_kwargs: MagicMock(),
-        Button=make_button,
-        Label=lambda *_args, **_kwargs: MagicMock(),
-        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
-        TclError=Exception,
-        LEFT="left",
-        RIGHT="right",
-        BOTTOM="bottom",
-        X="x",
-        Y="y",
-        BOTH="both",
-        HORIZONTAL="horizontal",
-        VERTICAL="vertical",
-        SUNKEN="sunken",
-        W="w",
-    )
-    from PIL import ImageTk
-    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
 
     def run_session():
         for image_x, image_y in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
@@ -655,10 +530,7 @@ def test_annotate_area_undo_saved_polygon(monkeypatch):
         button_commands["Undo polygon"]()
 
     root.mainloop.side_effect = run_session
-    chips = {
-        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
-        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
-    }
+    chips = _tiny_chips()
     existing = [{"class": "water",
                  "vertices": [[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]}]
 
@@ -672,56 +544,18 @@ def test_annotate_area_undo_saved_polygon(monkeypatch):
 
 def test_annotate_area_tab_toggles_composite_and_ndwi(monkeypatch):
     """Tab flips between the composite and NDWI chips, in order."""
-    button_commands = {}
-    root_bindings = {}
-
-    root = MagicMock()
-    root.winfo_screenwidth.return_value = 1920
-    root.winfo_screenheight.return_value = 1080
-    canvas = MagicMock()
-    canvas.create_image.return_value = 17
-    canvas.bind.side_effect = lambda *args: None
-    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
-        seq, func)
-
-    def make_button(_parent, text, command):
-        button_commands[text] = command
-        return MagicMock()
-
-    fake_tk = SimpleNamespace(
-        Tk=lambda: root,
-        Canvas=lambda *_args, **_kwargs: canvas,
-        Frame=lambda *_args, **_kwargs: MagicMock(),
-        Button=make_button,
-        Label=lambda *_args, **_kwargs: MagicMock(),
-        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
-        TclError=Exception,
-        LEFT="left",
-        RIGHT="right",
-        BOTTOM="bottom",
-        X="x",
-        Y="y",
-        BOTH="both",
-        HORIZONTAL="horizontal",
-        VERTICAL="vertical",
-        SUNKEN="sunken",
-        W="w",
-    )
-    from PIL import ImageTk
-    monkeypatch.setattr(
-        ImageTk, "PhotoImage",
-        lambda image: float(np.mean(np.asarray(image))))
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+    gui = _install_fake_tk(
+        monkeypatch,
+        photo_factory=lambda image: float(np.mean(np.asarray(image))))
+    root, canvas = gui.root, gui.canvas
+    root_bindings = gui.root_bindings
 
     def run_session():
         root_bindings["<Tab>"](SimpleNamespace())
         root_bindings["<Tab>"](SimpleNamespace())
 
     root.mainloop.side_effect = run_session
-    chips = {
-        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
-        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
-    }
+    chips = _tiny_chips()
 
     sw.annotate_area(chips)
     shown = [call.kwargs["image"]
@@ -731,50 +565,11 @@ def test_annotate_area_tab_toggles_composite_and_ndwi(monkeypatch):
 
 def test_annotate_area_auto_close_toggle(monkeypatch):
     """Auto-close defaults on; the button turns click-to-close off."""
-    button_commands = {}
-    canvas_bindings = {}
-    root_bindings = {}
-    scroll_offset = 10
+    gui = _install_fake_tk(monkeypatch)
+    root, canvas = gui.root, gui.canvas
+    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
+    scroll_offset = gui.scroll_offset
     expected_scale = 4
-
-    root = MagicMock()
-    root.winfo_screenwidth.return_value = 1920
-    root.winfo_screenheight.return_value = 1080
-    canvas = MagicMock()
-    canvas.create_image.return_value = 17
-    canvas.canvasx.side_effect = lambda value: value + scroll_offset
-    canvas.canvasy.side_effect = lambda value: value + scroll_offset
-    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
-        seq, func)
-    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
-        seq, func)
-
-    def make_button(_parent, text, command):
-        button_commands[text] = command
-        return MagicMock()
-
-    fake_tk = SimpleNamespace(
-        Tk=lambda: root,
-        Canvas=lambda *_args, **_kwargs: canvas,
-        Frame=lambda *_args, **_kwargs: MagicMock(),
-        Button=make_button,
-        Label=lambda *_args, **_kwargs: MagicMock(),
-        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
-        TclError=Exception,
-        LEFT="left",
-        RIGHT="right",
-        BOTTOM="bottom",
-        X="x",
-        Y="y",
-        BOTH="both",
-        HORIZONTAL="horizontal",
-        VERTICAL="vertical",
-        SUNKEN="sunken",
-        W="w",
-    )
-    from PIL import ImageTk
-    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
 
     def click(image_x, image_y):
         canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
@@ -792,10 +587,7 @@ def test_annotate_area_auto_close_toggle(monkeypatch):
         button_commands["Close as non-water"]()
 
     root.mainloop.side_effect = run_session
-    chips = {
-        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
-        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
-    }
+    chips = _tiny_chips()
 
     new_polygons, kept = sw.annotate_area(chips)
     assert new_polygons == [
@@ -810,51 +602,13 @@ def test_annotate_area_auto_close_toggle(monkeypatch):
 
 def test_annotate_area_numbers_polygons_in_list_order(monkeypatch):
     """Loaded and new polygons show 1-based list numbers; undo clears tags."""
-    button_commands = {}
-    canvas_bindings = {}
-    scroll_offset = 10
+    gui = _install_fake_tk(
+        monkeypatch, polygon_ids=[301, 302],
+        rectangle_ids=[401, 402], text_ids=[501, 502])
+    root, canvas = gui.root, gui.canvas
+    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
+    scroll_offset = gui.scroll_offset
     expected_scale = 4
-
-    root = MagicMock()
-    root.winfo_screenwidth.return_value = 1920
-    root.winfo_screenheight.return_value = 1080
-    canvas = MagicMock()
-    canvas.create_image.return_value = 17
-    canvas.canvasx.side_effect = lambda value: value + scroll_offset
-    canvas.canvasy.side_effect = lambda value: value + scroll_offset
-    canvas.create_polygon.side_effect = [301, 302]
-    canvas.create_rectangle.side_effect = [401, 402]
-    canvas.create_text.side_effect = [501, 502]
-    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
-        seq, func)
-    root.bind.side_effect = lambda seq, func: None
-
-    def make_button(_parent, text, command):
-        button_commands[text] = command
-        return MagicMock()
-
-    fake_tk = SimpleNamespace(
-        Tk=lambda: root,
-        Canvas=lambda *_args, **_kwargs: canvas,
-        Frame=lambda *_args, **_kwargs: MagicMock(),
-        Button=make_button,
-        Label=lambda *_args, **_kwargs: MagicMock(),
-        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
-        TclError=Exception,
-        LEFT="left",
-        RIGHT="right",
-        BOTTOM="bottom",
-        X="x",
-        Y="y",
-        BOTH="both",
-        HORIZONTAL="horizontal",
-        VERTICAL="vertical",
-        SUNKEN="sunken",
-        W="w",
-    )
-    from PIL import ImageTk
-    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
 
     def run_session():
         for image_x, image_y in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
@@ -866,10 +620,7 @@ def test_annotate_area_numbers_polygons_in_list_order(monkeypatch):
         button_commands["Undo polygon"]()
 
     root.mainloop.side_effect = run_session
-    chips = {
-        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
-        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
-    }
+    chips = _tiny_chips()
     existing = [{"class": "water",
                  "vertices": [[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]}]
 
@@ -913,6 +664,47 @@ def test_mask_known_features_skips_missing_files(capsys):
     assert "skipping sea masking" in out
     assert "skipping urban masking" in out
     assert (arrays["B04"] == 1).all()
+
+
+def test_mask_known_features_masks_sea_and_urban(tmp_path):
+    """Sea outside the land boundary and urban classes 20/21 become NaN."""
+    import json
+
+    from rasterio.transform import Affine
+
+    transform = Affine(1, 0, 0, 0, -1, 4)
+    meta = {"transform": transform, "width": 4, "height": 4,
+            "crs": "EPSG:4326"}
+    land = {"type": "FeatureCollection", "features": [{
+        "type": "Feature", "properties": {},
+        "geometry": {"type": "Polygon", "coordinates": [
+            [[0, 0], [2, 0], [2, 4], [0, 4], [0, 0]]]}}]}
+    boundaries_path = tmp_path / "land.geojson"
+    boundaries_path.write_text(json.dumps(land), encoding="utf-8")
+    urban_values = np.full((4, 4), 10, dtype=np.uint8)
+    urban_values[0, 0] = 20
+    urban_values[1, 1] = 21
+    urban_path = tmp_path / "urban.tif"
+    with rasterio.open(
+            urban_path, "w", driver="GTiff", height=4, width=4, count=1,
+            dtype="uint8", transform=transform, crs="EPSG:4326") as dst:
+        dst.write(urban_values, 1)
+
+    from openresin import config as c
+    arrays = {name: np.full((4, 4), 5.0, dtype=np.float32)
+              for name in c.SW_FEATURES}
+    for name in c.SW_FEATURES:
+        arrays[name][3, 0] = np.nan  # pre-existing gap stays NaN
+
+    sw.mask_known_features(arrays, meta, str(boundaries_path), str(urban_path))
+
+    for name in c.SW_FEATURES:
+        assert np.isnan(arrays[name][:, 2:]).all()  # sea, right half
+        assert np.isnan(arrays[name][0, 0])  # urban class 20 on land
+        assert np.isnan(arrays[name][1, 1])  # urban class 21 on land
+        assert arrays[name][2, 0] == 5.0  # valid land untouched
+        assert arrays[name][0, 1] == 5.0  # valid land untouched
+        assert np.isnan(arrays[name][3, 0])  # pre-existing NaN stays NaN
 
 
 def _area_record_polygons():
@@ -1074,48 +866,11 @@ def test_rasterize_clips_to_window_and_keeps_halves():
 
 def test_annotate_reviewed_area_draws_exclusion(monkeypatch):
     """The reviewed editor draws, numbers and undoes exclusions."""
-    button_commands = {}
-    canvas_bindings = {}
-    scroll_offset = 10
+    gui = _install_fake_tk(monkeypatch)
+    root, canvas = gui.root, gui.canvas
+    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
+    scroll_offset = gui.scroll_offset
     expected_scale = 4
-
-    root = MagicMock()
-    root.winfo_screenwidth.return_value = 1920
-    root.winfo_screenheight.return_value = 1080
-    canvas = MagicMock()
-    canvas.create_image.return_value = 17
-    canvas.canvasx.side_effect = lambda value: value + scroll_offset
-    canvas.canvasy.side_effect = lambda value: value + scroll_offset
-    canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
-        seq, func)
-    root.bind.side_effect = lambda seq, func: None
-
-    def make_button(_parent, text, command):
-        button_commands[text] = command
-        return MagicMock()
-
-    fake_tk = SimpleNamespace(
-        Tk=lambda: root,
-        Canvas=lambda *_args, **_kwargs: canvas,
-        Frame=lambda *_args, **_kwargs: MagicMock(),
-        Button=make_button,
-        Label=lambda *_args, **_kwargs: MagicMock(),
-        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
-        TclError=Exception,
-        LEFT="left",
-        RIGHT="right",
-        BOTTOM="bottom",
-        X="x",
-        Y="y",
-        BOTH="both",
-        HORIZONTAL="horizontal",
-        VERTICAL="vertical",
-        SUNKEN="sunken",
-        W="w",
-    )
-    from PIL import ImageTk
-    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
 
     def click(image_x, image_y):
         canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
@@ -1131,10 +886,7 @@ def test_annotate_reviewed_area_draws_exclusion(monkeypatch):
         button_commands["Close as water"]()
 
     root.mainloop.side_effect = run_session
-    chips = {
-        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
-        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
-    }
+    chips = _tiny_chips()
 
     (new_polygons, kept, new_exclusions, kept_exclusions,
      action) = sw.annotate_reviewed_area(chips)

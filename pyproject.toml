@@ -14,7 +14,8 @@ dependencies = [
 	"geopandas",
 	"fiona",
 	"rasterio",
-	"shapely"
+	"shapely",
+	"scikit-learn"
 ]
 requires-python = ">=3.11"
 
@@ -36,6 +37,7 @@ openresin-train		= "openresin.train:main"
 openresin-predict	= "openresin.predict:main"
 openresin-evaluate	= "openresin.evaluate:main"
 openresin-label-sw	= "openresin.label_sw:main"
+openresin-train-sw	= "openresin.train_sw:main"
 
 [dependency-groups]
 dev = [

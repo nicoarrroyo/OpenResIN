@@ -32,7 +32,7 @@ def discover_scenes(sat_images_dir):
     return scenes
 
 
-def _granule_img_data(scene_dir, res):
+def granule_img_data(scene_dir, res):
     """Return one scene's IMG_DATA directory for the requested resolution."""
     granule = os.path.join(scene_dir, "GRANULE")
     subdirs = [d for d in os.listdir(granule)
@@ -45,7 +45,7 @@ def _granule_img_data(scene_dir, res):
 
 def read_scene_60m(scene_dir):
     """Return red, green, nir, tci, meta, and meta10 for one 60 m scene."""
-    img_60m = _granule_img_data(scene_dir, "R60m")
+    img_60m = granule_img_data(scene_dir, "R60m")
     tci_names = [f for f in sorted(os.listdir(img_60m))
                  if f.endswith("_TCI_60m.jp2")]
     if not tci_names:
@@ -69,7 +69,7 @@ def read_scene_60m(scene_dir):
         scene["tci"] = src.read()
         scene["meta"] = src.meta.copy()
 
-    img_10m = _granule_img_data(scene_dir, "R10m")
+    img_10m = granule_img_data(scene_dir, "R10m")
     b04_names = [f for f in sorted(os.listdir(img_10m))
                  if f.endswith("_B04_10m.jp2")]
     if not b04_names:
@@ -207,7 +207,7 @@ def build_provenance(scene_dirs, month, inference_device=None):
 # %% 2. Read and mask the 10 m classifier bands
 def read_scene_10m(scene_dir):
     """Return blue, green, red, nir, tci, and meta for one 10 m scene."""
-    img_10m = _granule_img_data(scene_dir, "R10m")
+    img_10m = granule_img_data(scene_dir, "R10m")
     tci_names = [f for f in sorted(os.listdir(img_10m))
                  if f.endswith("_TCI_10m.jp2")]
     if not tci_names:
@@ -571,12 +571,13 @@ def validate_area_record(record):
     return record
 
 
-def load_area_record(path):
-    """Load one area file with validation; missing exclusions mean []."""
+def load_area_record_snapshot(path):
+    """Return a validated area record and digest from one byte snapshot."""
     try:
-        with open(path, encoding="utf-8") as handle:
-            saved = json.load(handle)
-    except (OSError, ValueError) as exc:
+        with open(path, "rb") as handle:
+            payload = handle.read()
+        saved = json.loads(payload.decode("utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
         raise ValueError(f"cannot read area file {path}: {exc}") from exc
     validate_area_record(saved)
     record = {
@@ -589,7 +590,15 @@ def load_area_record(path):
     }
     if saved.get("completion") is not None:
         record["completion"] = saved["completion"]
-    return record
+    return {
+        "record": record,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def load_area_record(path):
+    """Load one area file with validation; missing exclusions mean []."""
+    return load_area_record_snapshot(path)["record"]
 
 
 def save_area_record(path, record):
@@ -675,7 +684,7 @@ def read_band_window(scene_dir, band, window):
     """Read one 10 m band area as a 2D float32 array."""
     from rasterio.windows import Window as RioWindow
 
-    img_10m = _granule_img_data(scene_dir, "R10m")
+    img_10m = granule_img_data(scene_dir, "R10m")
     names = [f for f in sorted(os.listdir(img_10m))
              if f.endswith(f"_{band}_10m.jp2")]
     if not names:
@@ -690,7 +699,7 @@ def read_tci_window(scene_dir, window):
     """Read one 10 m TCI area without loading the whole tile."""
     from rasterio.windows import Window as RioWindow
 
-    img_10m = _granule_img_data(scene_dir, "R10m")
+    img_10m = granule_img_data(scene_dir, "R10m")
     names = [f for f in sorted(os.listdir(img_10m))
              if f.endswith("_TCI_10m.jp2")]
     if not names:

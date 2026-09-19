@@ -52,6 +52,49 @@ def test_main_passes_requested_month_to_overview(tmp_path, monkeypatch):
     assert calls == ["2027-03"]
 
 
+def test_main_fails_without_scenes_without_processing(tmp_path, monkeypatch):
+    """No matching scenes fails without building overviews or features."""
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("processing must not run without scenes")
+
+    monkeypatch.setattr(label_sw.sw, "discover_scenes", lambda _dir: [])
+    monkeypatch.setattr(
+        label_sw, "_create_navigation_overview", fail_if_called)
+    monkeypatch.setattr(label_sw, "_create_monthly_features", fail_if_called)
+    monkeypatch.setattr(label_sw, "_freeze_area_split", fail_if_called)
+    monkeypatch.setattr(label_sw, "_annotate_grid_area", fail_if_called)
+
+    result = label_sw.main([
+        "--month", "2026-04",
+        "--out-dir", str(tmp_path / "outputs"),
+    ])
+
+    assert result == 1
+
+
+def test_main_rejects_unpaired_split_flags_before_processing(
+        tmp_path, monkeypatch):
+    """A lone --train-areas fails via the parser before any discovery."""
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("nothing must run after a usage error")
+
+    monkeypatch.setattr(label_sw.sw, "discover_scenes", fail_if_called)
+    monkeypatch.setattr(
+        label_sw, "_create_navigation_overview", fail_if_called)
+    monkeypatch.setattr(label_sw, "_create_monthly_features", fail_if_called)
+
+    import pytest
+
+    with pytest.raises(SystemExit) as excinfo:
+        label_sw.main([
+            "--month", "2026-04",
+            "--out-dir", str(tmp_path / "outputs"),
+            "--train-areas", "1", "2", "3", "4", "5", "6", "7", "8",
+        ])
+
+    assert excinfo.value.code == 2
+
+
 def test_prepare_annotation_chips_adds_two_stage_ndwi_composite(
         tmp_path, monkeypatch, capsys):
     """NDWI follows date-first aggregation and sits after the TCI composite."""

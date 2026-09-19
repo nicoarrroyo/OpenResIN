@@ -1,8 +1,8 @@
 # Open-source Reservoir Identifier and Navigator (OpenResIN)
 
-OpenResIN is a project for identifying small water reservoirs in Sentinel-2 satellite imagery. Its existing patch-based pipeline has four stages: label a scene by hand, train a classification model on the labelled image patches, run that model across a whole tile, and score the result. A fifth command, `openresin-label-sw`, is an experimental labelling and feature-building path for a replacement pixel-level surface-water classifier; it does not yet connect to the existing trainer.
+OpenResIN is a project for identifying small water reservoirs in Sentinel-2 satellite imagery. Its existing patch-based pipeline has four stages: label a scene by hand, train a classification model on the labelled image patches, run that model across a whole tile, and score the result. The experimental surface-water path has separate commands for feature building and polygon annotation (`openresin-label-sw`) and for preparing pixel datasets (`openresin-train-sw prepare`). It does not use the existing patch trainer.
 
-Each stage of this pipeline is a console script, and each stage hands the next one files on disk. These files are all ordinary PNGs and CSVs, so you can open them and look at them at any point.
+Each stage of the existing four-stage pipeline is a console script, and each stage hands the next one ordinary PNG or CSV files on disk. The surface-water preparation command instead writes numerical NPZ datasets with a readable JSON manifest.
 
 > [!important]
 > The pipeline is not fully final; Labelling and training are relatively stable/sound. Inference and evaluation do run but are largely provisional and known to have significant methodological limitations.
@@ -26,7 +26,7 @@ python -m venv .venv
 
 Activate it with `.\.venv\Scripts\Activate.ps1` on Windows PowerShell, or `source .venv/bin/activate` on Linux and macOS.
 
-**3. Install the package.** This installs the dependencies and puts the four existing pipeline stages plus `openresin-label-sw` on your PATH as console scripts.
+**3. Install the package.** This installs the dependencies, including scikit-learn, and puts the four existing pipeline stages plus the two experimental surface-water commands on your PATH as console scripts.
 
 ```bash
 pip install -e .
@@ -89,7 +89,7 @@ Every command takes `-h` and `--help` to list its flags and their defaults.
 
 ### Experimental surface-water labelling (`openresin-label-sw`)
 
-This fifth command is a separate, incomplete path toward a monthly pixel-level water/non-water classifier. With Sentinel-2 L2A `.SAFE` scenes in `data/sat-images/` and the masks described in [`data/README.md`](data/README.md), for example:
+This command is part of a separate, incomplete path toward a monthly pixel-level water/non-water classifier. With Sentinel-2 L2A `.SAFE` scenes in `data/sat-images/` and the masks described in [`data/README.md`](data/README.md), for example:
 
 ```bash
 openresin-label-sw --month 2026-04
@@ -97,6 +97,21 @@ openresin-label-sw --month 2026-04 --annotate 25
 ```
 
 The first command builds a numbered navigation preview and six monthly feature arrays under `outputs/label-water/`. Inspect the preview and choose a suitable cell number before using `--annotate`; the second command opens that cell for water and non-water polygon labels and saves them as `area-025.json` in the same output directory. `--train-areas` and `--test-areas` now accept eight training and four test areas, expanded from the original four-training/two-test plan; an existing `areas.json` is not changed automatically. Run `openresin-label-sw --help` for the exact flags. The annotation NDWI chip prefers the saved masked monthly NDWI (`NDWI (masked)`) when its provenance matches the month, scenes and masks, and otherwise falls back to a raw B03/B08 window calculation (`NDWI (raw)`) with a console warning; the TCI composite and dated chips stay raw window reads in both cases. NDWI colours use a `[-0.5, 0.5]` diverging display only, centred on zero with non-finite values shown black. This command does **not** train a random forest, and `openresin-train` still trains the older patch model.
+
+### Prepare the surface-water baseline (`openresin-train-sw prepare`)
+
+Preparation is a separate, non-fitting checkpoint. It requires the frozen T31UCU April 2026 split, all twelve active completion decisions, the saved six-feature archive, and the four recorded `.SAFE` source scenes. Choose a new run directory; preparation refuses a populated destination and never edits the feature, split, or annotation inputs.
+
+```bash
+openresin-train-sw prepare \
+  --input-dir outputs/label-water \
+  --run-dir outputs/label-water/runs/2026-04-v1 \
+  --source-image-root data/sat-images
+```
+
+The command validates the recorded scene identities and grids, completion digests, exact 8/4 split, feature order and final six-feature validity. It then writes `v1-train.npz`, `v1-test.npz`, `v1-sampling.json`, and `prepare-complete.json`. Training uses a deterministic 100-pixel water cap per polygon followed by a 1,000-pixel water cap per area, then matches the selected water count with non-water pixels from the same area. Test data contain every eligible labelled pixel at natural prevalence. The NPZ files retain area, scene row/column, and polygon position for every sample.
+
+`fit` and `evaluate` are not implemented in this checkpoint. `openresin-train-sw prepare` does not fit a model, calculate scores, or show held-out predictions. Keep the prepared directory unchanged for the later phases; if preparation fails, correct the reported input problem and use a new or empty run directory. Do not use `openresin-train` for these datasets: that command remains the older Keras patch trainer.
 
 ### 1. Set up the data directory
 
@@ -168,6 +183,7 @@ OpenResIN/
 ├── models/               # Trained models. Not tracked by git, arrives empty
 ├── outputs/              # Everything the pipeline generates. Not tracked by git
 │   ├── chunks/           # Mini-chunk PNGs cut for prediction, one folder per scene
+│   ├── label-water/      # Surface-water features, annotations and prepared runs
 │   ├── labels/           # Label coordinates from your own labelling sessions
 │   ├── patches/          # Segmented training images, one folder per class
 │   └── predictions/      # Model predictions across a whole tile
@@ -185,6 +201,8 @@ src/openresin/
 ├── labelling.py          # The labelling steps that label.py orchestrates
 ├── train.py              # openresin-train. Orchestrates training
 ├── modelling.py          # Dataset loading, model building, training, and saving
+├── train_sw.py           # Surface-water preparation command
+├── modelling_sw.py       # Surface-water validation and deterministic sampling
 ├── predict.py            # openresin-predict. Runs predictions over a whole tile
 ├── inference.py          # The core prediction logic that predict.py drives
 ├── evaluate.py           # openresin-evaluate. Confusion matrix and metrics
@@ -196,13 +214,13 @@ src/openresin/
 └── epoch_pathfinder.py   # Experimental epoch sweep. Not part of the pipeline
 ```
 
-The test suite is deliberately thin. `test_config.py` checks the path anchors survive a changed working directory and that the shipped settings have not been scaled down; `test_imports.py` checks every module imports without side effects and that each stage exposes a `main()`. Tests for the labelling and training stages are planned.
+The test suite checks configuration and import contracts, the surface-water feature and annotation workflow, completion and label-state semantics, and deterministic preparation of the random-forest datasets. The new random-forest fit and evaluation phases do not have tests yet because those phases are not implemented in this checkpoint.
 
 ## Project Status and Current Limitations
 
 Labelling and training are the stable parts of the pipeline: `openresin-label` and `openresin-train` run end to end and produce outputs as intended. The actual model for `openresin-train` may not stay as a Keras Sequential classifier, but the scaffolding of the stages themselves is intentional.
 
-`openresin-label-sw` is experimental and separate from that four-stage path. Its monthly features and polygon labels are not yet connected to a pixel classifier or held-out evaluation.
+`openresin-label-sw` and `openresin-train-sw` are experimental and separate from that four-stage path. Monthly features and polygon labels now connect to deterministic prepared pixel datasets. Random-forest fitting, held-out evaluation, and raster export are the next checkpoint and are not yet implemented.
 
 Prediction and evaluation are provisional: `openresin-predict` and `openresin-evaluate` both run and both produce output, but the methodology behind them is not settled and is expected to be replaced. The code is left in place so the pipeline can be executed end to end, and so that a reader can see what is currently being done before deciding what should be done instead.
 
