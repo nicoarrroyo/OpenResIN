@@ -347,3 +347,332 @@ def test_sampling_fails_when_nonwater_cannot_match_water():
 
     with pytest.raises(ValueError, match="non-water"):
         modelling_sw.sample_training_area(record, features)
+
+
+# %% Step 2: fit, scores, rasters and end-to-end (issue 10).
+
+def _tiny_balanced_train():
+    rng = np.random.default_rng(7)
+    water = rng.normal(2000, 50, size=(6, 6)).astype(np.float32)
+    land = rng.normal(1000, 50, size=(6, 6)).astype(np.float32)
+    stacked = np.vstack((water, land))
+    # Interleave water and land so both areas below stay balanced.
+    order = np.array([0, 6, 1, 7, 2, 8, 3, 9, 4, 10, 5, 11])
+    return {
+        "X": stacked[order],
+        "y": np.tile(np.array([1, 0], dtype=np.uint8), 6),
+        "area": np.repeat(np.array([1, 3], dtype=np.int32), 6),
+        "row": np.arange(12, dtype=np.int32),
+        "col": np.arange(12, dtype=np.int32),
+        "polygon_index": np.ones(12, dtype=np.int32),
+    }
+
+
+def test_threshold_counts_exact_half_as_water():
+    probabilities = np.array([0.49, 0.5, 0.5001, 0.0, 1.0], dtype=np.float64)
+    binary = modelling_sw.apply_water_threshold(probabilities)
+
+    assert binary.dtype == np.uint8
+    assert binary.tolist() == [0, 1, 1, 0, 1]
+
+
+def test_scores_report_null_with_reason_not_zero():
+    no_predicted = modelling_sw.score_binary_predictions(
+        [0, 1, 1], [0, 0, 0])
+    assert no_predicted["confusion_matrix"] == [[1, 0], [2, 0]]
+    assert no_predicted["precision"] is None
+    assert no_predicted["precision"] != 0
+    assert no_predicted["undefined_reasons"]["precision"] == \
+        "no predicted water"
+    assert no_predicted["recall"] == 0.0
+    assert no_predicted["f1"] == 0.0
+
+    no_truth = modelling_sw.score_binary_predictions(
+        [0, 0, 0], [0, 0, 1])
+    assert no_truth["recall"] is None
+    assert no_truth["undefined_reasons"]["recall"] == "no true water"
+    assert no_truth["precision"] == 0.0
+
+    empty = modelling_sw.score_binary_predictions([0, 0], [0, 0])
+    assert empty["precision"] is None
+    assert empty["recall"] is None
+    assert empty["f1"] is None
+    assert empty["undefined_reasons"]["f1"] == "no true or predicted water"
+
+    perfect = modelling_sw.score_binary_predictions(
+        [0, 0, 1, 1], [0, 0, 1, 1])
+    assert perfect["confusion_matrix"] == [[2, 0], [0, 2]]
+    assert perfect["precision"] == 1.0
+    assert perfect["recall"] == 1.0
+    assert perfect["f1"] == 1.0
+
+    json.dumps(no_predicted, allow_nan=False)
+    json.dumps(empty, allow_nan=False)
+
+
+def test_pooled_metrics_sum_counts_not_area_means():
+    test_dataset = {
+        "y": np.array([1, 0, 1, 0, 0, 0], dtype=np.uint8),
+        "area": np.array([41, 41, 43, 43, 43, 43], dtype=np.int32),
+    }
+    predicted = np.array([1, 0, 0, 0, 0, 0], dtype=np.uint8)
+
+    scoring = modelling_sw.evaluate_test_predictions(
+        test_dataset, predicted)
+
+    assert scoring["per_area"]["41"]["f1"] == 1.0
+    assert scoring["per_area"]["43"]["f1"] == 0.0
+    assert scoring["pooled"]["confusion_matrix"] == [[4, 0], [1, 1]]
+    assert scoring["pooled"]["f1"] == pytest.approx(2 / 3)
+    assert scoring["confusion_convention"].startswith("rows true")
+
+
+def test_tiny_forest_fits_reloads_and_shares_one_convention(tmp_path):
+    train = _tiny_balanced_train()
+
+    model = modelling_sw.fit_water_classifier(train)
+    assert list(model.classes_.tolist()) == [0, 1]
+
+    probabilities, binary = modelling_sw.predict_water_labels(
+        model, train["X"])
+    assert probabilities.dtype == np.float32
+    assert binary.dtype == np.uint8
+    assert np.array_equal(
+        binary, (probabilities >= np.float32(0.5)).astype(np.uint8))
+    assert np.all((probabilities >= 0.0) & (probabilities <= 1.0))
+
+    manifest_stub = {"model": {"requested": {
+        "n_estimators": 100, "random_state": 202604,
+        "class_weight": None}}}
+    bundle_path = tmp_path / "v1-model.pkl"
+    modelling_sw._save_model_bundle(
+        bundle_path, model, "0" * 64, "1" * 64, manifest_stub)
+    reloaded = modelling_sw._load_model_bundle(bundle_path)["model"]
+    reloaded_probabilities, reloaded_binary = \
+        modelling_sw.predict_water_labels(reloaded, train["X"])
+    assert np.array_equal(probabilities, reloaded_probabilities)
+    assert np.array_equal(binary, reloaded_binary)
+
+
+def test_fit_rejects_single_class_and_unbalanced():
+    balanced = _tiny_balanced_train()
+    single = {**balanced,
+              "y": np.zeros(12, dtype=np.uint8)}
+    with pytest.raises(ValueError, match="single-class"):
+        modelling_sw.fit_water_classifier(single)
+
+    unbalanced = {**balanced,
+                  "y": np.array([1, 1, 1, 1, 0, 0] * 2, dtype=np.uint8)}
+    with pytest.raises(ValueError, match="unbalanced"):
+        modelling_sw.fit_water_classifier(unbalanced)
+
+
+def test_fit_rejects_nonfinite_features_and_wrong_manifest_order(
+        tmp_path, monkeypatch):
+    balanced = _tiny_balanced_train()
+    nonfinite = {**balanced,
+                 "X": balanced["X"].copy()}
+    nonfinite["X"][0, 0] = np.nan
+    with pytest.raises(ValueError, match="must be finite"):
+        modelling_sw.fit_water_classifier(nonfinite)
+
+    input_dir, source_root, contract, run_dir, _ = _prepare_then_fit(
+        tmp_path, monkeypatch)
+    manifest_path = run_dir / "v1-sampling.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["feature_order"] = list(reversed(manifest["feature_order"]))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="feature_order"):
+        modelling_sw.fit_run(input_dir, run_dir, source_root, contract)
+
+
+def _prepare_then_fit(tmp_path, monkeypatch):
+    input_dir, source_root, contract = _write_preparation_fixture(
+        tmp_path / "fixture", monkeypatch)
+    run_dir = tmp_path / "run"
+    manifest = modelling_sw.prepare_datasets(
+        input_dir, run_dir, source_root, contract=contract)
+    return input_dir, source_root, contract, run_dir, manifest
+
+
+def test_fit_uses_only_training_rows_and_leaves_manifest_stable(
+        tmp_path, monkeypatch):
+    input_dir, source_root, contract, run_dir, _ = _prepare_then_fit(
+        tmp_path, monkeypatch)
+    manifest_path = run_dir / "v1-sampling.json"
+    before = labelling_sw.file_sha256(manifest_path)
+    (run_dir / "v1-test.npz").unlink()
+
+    modelling_sw.fit_run(input_dir, run_dir, source_root, contract)
+
+    assert (run_dir / "v1-model.pkl").is_file()
+    assert (run_dir / "fit-complete.json").is_file()
+    assert labelling_sw.file_sha256(manifest_path) == before
+    with pytest.raises(FileExistsError, match="already exists"):
+        modelling_sw.fit_run(input_dir, run_dir, source_root, contract)
+
+
+def test_fit_rejects_changed_training_data(tmp_path, monkeypatch):
+    input_dir, source_root, contract, run_dir, _ = _prepare_then_fit(
+        tmp_path, monkeypatch)
+    with np.load(run_dir / "v1-train.npz", allow_pickle=False) as archive:
+        tampered = {key: np.array(archive[key]) for key in archive.files}
+    tampered["y"][0] = 1 - tampered["y"][0]
+    np.savez_compressed(run_dir / "v1-train.npz", **tampered)
+
+    with pytest.raises(ValueError, match="no longer matches"):
+        modelling_sw.fit_run(input_dir, run_dir, source_root, contract)
+    assert not (run_dir / "v1-model.pkl").exists()
+
+
+def test_raster_roundtrip_keeps_offset_transform_and_nodata(tmp_path):
+    transform = [10.0, 1.0, 300000.0, 0.5, -10.0, 5900040.0]
+    grid_reference = {
+        "shape": [16, 16], "crs": "EPSG:32631", "transform": transform}
+    window = [10, 13, 20, 23]
+    probability_grid = np.array([
+        [0.1, 0.9, np.nan],
+        [0.2, 0.5, 0.8],
+        [np.nan, 0.0, 1.0],
+    ], dtype=np.float32)
+    binary_grid = np.array([
+        [0, 1, 255],
+        [0, 1, 1],
+        [255, 0, 1],
+    ], dtype=np.uint8)
+    tags = {"tile": "T31UCU", "month": "2026-04"}
+
+    probability_path = tmp_path / "prob.tif"
+    binary_path = tmp_path / "binary.tif"
+    modelling_sw.write_area_geotiffs(
+        probability_path, binary_path,
+        probability_grid, binary_grid, window, grid_reference, tags)
+
+    for path, nodata, dtype in (
+            (probability_path, -9999.0, "float32"),
+            (binary_path, 255, "uint8")):
+        with rasterio.open(path) as source:
+            assert source.count == 1
+            assert source.dtypes[0] == dtype
+            assert source.nodata == nodata
+            assert str(source.crs) == "EPSG:32631"
+            assert (source.height, source.width) == (3, 3)
+            assert list(source.transform)[:6] != transform
+    with rasterio.open(binary_path) as source:
+        assert np.array_equal(source.read(1), binary_grid)
+    with rasterio.open(probability_path) as source:
+        actual = source.read(1)
+        assert actual[0, 0] == pytest.approx(0.1)
+        assert actual[0, 2] == np.float32(-9999.0)
+        assert actual[2, 2] == pytest.approx(1.0)
+
+
+def test_excluded_valid_pixels_still_receive_predictions():
+    window = [0, 3, 0, 3]
+    features = _features((3, 3))
+    record = _record(41, "test", window, [
+        _rectangle(0, 0, 1, 1, polygon_id=1),
+    ], exclusions=[
+        {"vertices_scene": [[1, 1], [2, 1], [2, 2], [1, 2]]}
+    ])
+    label_mask, _, _ = label_sw.derive_area_label_state(
+        record, features, window, True)
+    assert label_mask[1, 1] == label_sw.LABEL_WITHHELD
+
+    class _WaterModel:
+        classes_ = np.array([0, 1])
+
+        def predict_proba(self, matrix):
+            return np.tile(np.array([[0.2, 0.8]]), (len(matrix), 1))
+
+    probability_grid, binary_grid = modelling_sw.predict_area_grids(
+        _WaterModel(), features)
+
+    assert binary_grid[1, 1] == 1
+    assert probability_grid[1, 1] == pytest.approx(0.8)
+
+    test_dataset, _ = modelling_sw.sample_test_area(record, features)
+    assert len(test_dataset["y"]) == 8
+
+
+def test_all_invalid_window_never_calls_the_forest():
+    features = {name: np.full((2, 2), np.nan, dtype=np.float32)
+                for name in c.SW_FEATURES}
+
+    class _ExplodingModel:
+        def predict_proba(self, matrix):
+            raise AssertionError("forest must not see an empty matrix")
+
+    probability_grid, binary_grid = modelling_sw.predict_area_grids(
+        _ExplodingModel(), features)
+
+    assert np.all(~np.isfinite(probability_grid))
+    assert np.array_equal(
+        binary_grid, np.full((2, 2), 255, dtype=np.uint8))
+
+
+def test_prepare_fit_evaluate_end_to_end_and_refuses_repeated_evaluate(
+        tmp_path, monkeypatch):
+    input_dir, source_root, contract, run_dir, _ = _prepare_then_fit(
+        tmp_path, monkeypatch)
+    manifest_path = run_dir / "v1-sampling.json"
+    manifest_before = labelling_sw.file_sha256(manifest_path)
+
+    modelling_sw.fit_run(input_dir, run_dir, source_root, contract)
+    metrics = modelling_sw.evaluate_run(
+        input_dir, run_dir, source_root, contract)
+
+    assert labelling_sw.file_sha256(manifest_path) == manifest_before
+    assert metrics["tile"] == "T31UCU"
+    assert metrics["threshold"] == 0.5
+    assert sorted(metrics["per_area"]) == ["41", "43", "45", "47"]
+    assert metrics["pooled"]["rows"] == 16
+    json.dumps(metrics, allow_nan=False)
+
+    expected_files = {"v1-model.pkl", "fit-complete.json",
+                      "v1-metrics.json", "evaluate-complete.json"}
+    for area_id in (41, 43, 45, 47):
+        expected_files |= {
+            f"area-{area_id:03d}-water-probability.tif",
+            f"area-{area_id:03d}-water-binary.tif",
+            f"area-{area_id:03d}-overlay.png",
+        }
+    assert expected_files <= {path.name for path in run_dir.iterdir()}
+
+    with np.load(run_dir / "v1-test.npz", allow_pickle=False) as test:
+        test_rows = {key: np.array(test[key])
+                     for key in modelling_sw.DATASET_KEYS}
+    bundle = modelling_sw._load_model_bundle(run_dir / "v1-model.pkl")
+    expected_probabilities, expected_binary = \
+        modelling_sw.predict_water_labels(bundle["model"], test_rows["X"])
+    scoring = modelling_sw.evaluate_test_predictions(
+        test_rows, expected_binary)
+    assert scoring["pooled"] == metrics["pooled"]
+
+    for area_id in (41, 43, 45, 47):
+        with rasterio.open(
+                run_dir / f"area-{area_id:03d}-water-binary.tif") as source:
+            raster = source.read(1)
+            assert source.nodata == 255
+        mask = test_rows["area"] == area_id
+        manifest_areas = json.loads(manifest_path.read_text(
+            encoding="utf-8"))["areas"]
+        record_window = next(
+            entry["window"] for entry in manifest_areas
+            if entry["id"] == area_id)
+        row0, _, col0, _ = record_window
+        for row, col, expected in zip(
+                test_rows["row"][mask].tolist(),
+                test_rows["col"][mask].tolist(),
+                expected_binary[mask].tolist()):
+            assert raster[int(row) - row0, int(col) - col0] == int(expected)
+        overlay = run_dir / f"area-{area_id:03d}-overlay.png"
+        assert overlay.stat().st_size > 0
+
+    metrics_sha_before = labelling_sw.file_sha256(
+        run_dir / "v1-metrics.json")
+    with pytest.raises(FileExistsError, match="already succeeded"):
+        modelling_sw.evaluate_run(
+            input_dir, run_dir, source_root, contract)
+    assert labelling_sw.file_sha256(
+        run_dir / "v1-metrics.json") == metrics_sha_before
