@@ -676,3 +676,49 @@ def test_prepare_fit_evaluate_end_to_end_and_refuses_repeated_evaluate(
             input_dir, run_dir, source_root, contract)
     assert labelling_sw.file_sha256(
         run_dir / "v1-metrics.json") == metrics_sha_before
+
+
+def test_export_failure_keeps_scores_and_retry_finishes_run(
+        tmp_path, monkeypatch):
+    input_dir, source_root, contract, run_dir, _ = _prepare_then_fit(
+        tmp_path, monkeypatch)
+    modelling_sw.fit_run(input_dir, run_dir, source_root, contract)
+
+    write_geotiffs = modelling_sw.write_area_geotiffs
+    attempts = 0
+
+    def fail_first_export(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("simulated raster export failure")
+        return write_geotiffs(*args, **kwargs)
+
+    monkeypatch.setattr(modelling_sw, "write_area_geotiffs",
+                        fail_first_export)
+    with pytest.raises(OSError, match="simulated raster export failure"):
+        modelling_sw.evaluate_run(
+            input_dir, run_dir, source_root, contract)
+
+    metrics_path = run_dir / "v1-metrics.json"
+    assert metrics_path.is_file()
+    first_metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    metrics_digest = labelling_sw.file_sha256(metrics_path)
+    assert first_metrics["pooled"]["rows"] == 16
+    assert not (run_dir / "evaluate-complete.json").exists()
+    failures_path = run_dir / "evaluate-failures.jsonl"
+    failures = [json.loads(line) for line in failures_path.read_text(
+        encoding="utf-8").splitlines()]
+    assert len(failures) == 1
+    assert failures[0]["error_type"] == "OSError"
+    assert failures[0]["metrics_sha256"] == metrics_digest
+
+    completed_metrics = modelling_sw.evaluate_run(
+        input_dir, run_dir, source_root, contract)
+    assert (run_dir / "evaluate-complete.json").is_file()
+    assert labelling_sw.file_sha256(metrics_path) == metrics_digest
+    assert completed_metrics["pooled"] == first_metrics["pooled"]
+    marker = json.loads((run_dir / "evaluate-complete.json").read_text(
+        encoding="utf-8"))
+    assert marker["retried_partial_export"] is True
+    assert failures_path.read_text(encoding="utf-8").count("\n") == 1

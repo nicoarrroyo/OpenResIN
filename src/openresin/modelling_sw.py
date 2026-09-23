@@ -44,6 +44,7 @@ MODEL_FILENAME = "v1-model.pkl"
 METRICS_FILENAME = "v1-metrics.json"
 FIT_COMPLETE_FILENAME = "fit-complete.json"
 EVALUATE_COMPLETE_FILENAME = "evaluate-complete.json"
+EVALUATE_FAILURES_FILENAME = "evaluate-failures.jsonl"
 PROBABILITY_NODATA = -9999.0
 BINARY_NODATA = 255
 PREDICTION_BATCH_ROWS = 65536
@@ -1561,6 +1562,21 @@ def _publish_staged_binary(staged_path, final_path):
     return "preserved"
 
 
+def _record_evaluation_failure(run_dir, metrics_path, error):
+    """Keep an export failure beside any scores already published."""
+    record = {
+        "failed_at_utc": datetime.now(timezone.utc).isoformat(),
+        "error_type": type(error).__name__,
+        "error": str(error),
+        "metrics_sha256": (
+            labelling_sw.file_sha256(metrics_path)
+            if metrics_path.is_file() else None),
+    }
+    with open(run_dir / EVALUATE_FAILURES_FILENAME, "a",
+              encoding="utf-8") as handle:
+        handle.write(json.dumps(record, allow_nan=False) + "\n")
+
+
 def evaluate_run(input_dir, run_dir, source_image_root,
                  contract=BASELINE_CONTRACT):
     """Evaluate the saved forest once on the frozen test dataset.
@@ -1655,6 +1671,7 @@ def evaluate_run(input_dir, run_dir, source_image_root,
 
     temporary_dir = Path(tempfile.mkdtemp(
         prefix=".evaluate-", dir=run_dir.parent))
+    scores_published = False
     try:
         staged_metrics = temporary_dir / METRICS_FILENAME
         metrics = {
@@ -1697,6 +1714,10 @@ def evaluate_run(input_dir, run_dir, source_image_root,
             "implementation": _implementation_identity(),
         }
         _write_json(staged_metrics, metrics)
+        publish_states = {}
+        publish_states[str(metrics_path)] = _publish_staged_file(
+            staged_metrics, metrics_path, compare_core=_metrics_core)
+        scores_published = True
 
         staged_artifacts = []
         for area_id in sorted(contract.test_area_ids):
@@ -1741,9 +1762,6 @@ def evaluate_run(input_dir, run_dir, source_image_root,
                 run_dir / f"area-{area_id:03d}-overlay.png",
                 "binary"))
 
-        publish_states = {}
-        publish_states[str(metrics_path)] = _publish_staged_file(
-            staged_metrics, metrics_path, compare_core=_metrics_core)
         for staged_path, final_path, _kind in staged_artifacts:
             publish_states[str(final_path)] = _publish_staged_binary(
                 staged_path, final_path)
@@ -1766,6 +1784,10 @@ def evaluate_run(input_dir, run_dir, source_image_root,
         temporary_dir = None
         with open(metrics_path, encoding="utf-8") as handle:
             return json.load(handle)
+    except Exception as error:
+        if scores_published:
+            _record_evaluation_failure(run_dir, metrics_path, error)
+        raise
     finally:
         if temporary_dir is not None and temporary_dir.exists():
             shutil.rmtree(temporary_dir)
