@@ -611,6 +611,34 @@ def test_all_invalid_window_never_calls_the_forest():
         binary_grid, np.full((2, 2), 255, dtype=np.uint8))
 
 
+def test_prediction_overlay_renders_masked_ndwi_black(tmp_path, monkeypatch):
+    """A masked NDWI pixel must not show the figure's white background."""
+    from matplotlib.axes import Axes
+
+    shown = []
+    original_imshow = Axes.imshow
+
+    def capture_imshow(axis, data, *args, **kwargs):
+        shown.append(np.asarray(data).copy())
+        return original_imshow(axis, data, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "imshow", capture_imshow)
+    ndwi = np.array([[np.nan, 0.4]], dtype=np.float32)
+    binary = np.array([[255, 1]], dtype=np.uint8)
+    truth = np.array([[255, 1]], dtype=np.uint8)
+    path = tmp_path / "overlay.png"
+
+    modelling_sw.write_prediction_overlay(
+        path, 41, "2026-04", ndwi, binary, truth)
+
+    assert path.is_file() and path.stat().st_size > 0
+    assert len(shown) == 3
+    assert np.array_equal(shown[0][0, 0], [0, 0, 0])
+    assert np.array_equal(shown[1][0, 0], [0, 0, 0])
+    assert np.array_equal(shown[2][0, 0], [0, 0, 0])
+    assert not np.array_equal(shown[0][0, 1], [0, 0, 0])
+
+
 def test_prepare_fit_evaluate_end_to_end_and_refuses_repeated_evaluate(
         tmp_path, monkeypatch):
     input_dir, source_root, contract, run_dir, _ = _prepare_then_fit(

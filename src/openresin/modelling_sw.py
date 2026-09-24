@@ -1458,20 +1458,19 @@ def write_prediction_overlay(path, area_id, month, ndwi_window,
     if true_grid.shape != (height, width):
         raise ValueError("overlay truth and prediction have different shapes")
 
-    display_ndwi = np.where(
-        np.isfinite(ndwi_window), ndwi_window, np.nan)
+    display_ndwi = labelling_sw.colorise_ndwi(ndwi_window)
     prediction_display = np.full(
         (height, width, 3), 200, dtype=np.uint8)
     prediction_display[binary_grid == 1] = (30, 144, 255)
     prediction_display[binary_grid == 0] = (245, 235, 220)
-    prediction_display[binary_grid == BINARY_NODATA] = (40, 40, 40)
+    prediction_display[binary_grid == BINARY_NODATA] = (0, 0, 0)
     truth_display = np.full((height, width, 3), 90, dtype=np.uint8)
     truth_display[true_grid == 1] = (30, 144, 255)
     truth_display[true_grid == 0] = (255, 140, 0)
-    truth_display[true_grid == BINARY_NODATA] = (40, 40, 40)
+    truth_display[true_grid == BINARY_NODATA] = (0, 0, 0)
 
     figure, axes = plt.subplots(1, 3, figsize=(12, 4))
-    axes[0].imshow(display_ndwi, vmin=-0.5, vmax=0.5, cmap="RdBu")
+    axes[0].imshow(display_ndwi)
     axes[0].set_title("monthly NDWI ([-0.5, 0.5], NoData black)")
     axes[1].imshow(prediction_display)
     axes[1].set_title("predicted water (blue), land (cream)")
@@ -1483,7 +1482,7 @@ def write_prediction_overlay(path, area_id, month, ndwi_window,
         (patches.Patch(color="#1e90ff"), "water / predicted water"),
         (patches.Patch(color="#ff8c00"), "labelled non-water"),
         (patches.Patch(color="#f5ebdc"), "predicted non-water"),
-        (patches.Patch(color="#282828"), "NoData / unevaluated"),
+        (patches.Patch(color="#000000"), "NoData / unevaluated"),
     ]
     labels = [text for _, text in legend_items]
     handles = [handle for handle, _ in legend_items]
