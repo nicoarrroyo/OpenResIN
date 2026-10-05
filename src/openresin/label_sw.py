@@ -173,8 +173,9 @@ def _find_known_feature_masks():
 
 
 def _create_monthly_features(out_dir, scenes, device, month):
-    """Build and save the six 10 m features for one month."""
+    """Build and save thirteen classifier features on the 10 m grid."""
     features_by_date = {}
+    reflectance_records = []
     image_metadata = None
 
     for scene_dir in scenes:
@@ -191,6 +192,9 @@ def _create_monthly_features(out_dir, scenes, device, month):
         _print_step(3, "water indices")
         print(f"  indices for {os.path.basename(scene_dir)[:22]}")
         indices = sw.scene_indices(masked_bands)
+        added_features, reflectance_record = sw.added_scene_features(
+            scene_dir, scene, cloud_mask)
+        reflectance_records.append(reflectance_record)
 
         scene_features = {
             "B02": masked_bands["blue"],
@@ -198,6 +202,7 @@ def _create_monthly_features(out_dir, scenes, device, month):
             "B04": masked_bands["red"],
             "B08": masked_bands["nir"],
             **indices,
+            **added_features,
         }
         date = _scene_date(scene_dir)
         features_by_date.setdefault(date, []).append(scene_features)
@@ -213,6 +218,14 @@ def _create_monthly_features(out_dir, scenes, device, month):
     boundaries_path, urban_path = _find_known_feature_masks()
     sw.mask_known_features(
         features, image_metadata, boundaries_path, urban_path)
+    # Added layers require the original features and MNDWI to be usable.
+    original_valid = np.ones(features["B02"].shape, dtype=bool)
+    for name in ("B02", "B03", "B04", "B08", "NDWI", "NDVI"):
+        original_valid &= np.isfinite(features[name])
+    features["MNDWI"][~original_valid] = np.nan
+    added_valid = np.isfinite(features["MNDWI"])
+    for name in ("B11", "B12", "B05", "B06", "B07", "B8A"):
+        features[name][~added_valid] = np.nan
 
     os.makedirs(out_dir, exist_ok=True)
     features_path = os.path.join(out_dir, "features.npz")
@@ -225,6 +238,19 @@ def _create_monthly_features(out_dir, scenes, device, month):
         "source_scenes": sorted(os.path.basename(s) for s in scenes),
         "feature_order": list(c.SW_FEATURES),
         "aggregation": "valid median within date, then median across dates",
+        "spectral_method": {
+            "original_features": "B02/B03/B04/B08 in DN; NDWI and NDVI "
+                                 "from masked DN bands",
+            "added_bands": "(DN + BOA_ADD_OFFSET) / "
+                           "BOA_QUANTIFICATION_VALUE; no clipping",
+            "mndwi": "per-scene (B03 reflectance - B11 reflectance) / "
+                     "(B03 reflectance + B11 reflectance)",
+            "resampling": "20 m to B03 10 m grid, float32 bilinear; "
+                          "native DN=0 and any cloudy 10 m child masked "
+                          "before interpolation; destination B03=0 "
+                          "and cloud/shadow masked",
+            "scene_metadata": reflectance_records,
+        },
         "masks": {
             "cloud_shadow_classes": list(c.SW_CLOUD_SHADOW_CLASSES),
             "nodata_value": c.SW_NODATA_VALUE,
@@ -522,7 +548,7 @@ def check_completion_available(out_dir, month, tile, scenes, window):
 
 
 def load_final_features_window(out_dir, window):
-    """Read the six final feature arrays cropped to one area window."""
+    """Read the final classifier feature arrays cropped to one area window."""
     row0, row1, col0, col1 = (int(window[0]), int(window[1]),
                               int(window[2]), int(window[3]))
     features_path = os.path.join(out_dir, "features.npz")
@@ -594,7 +620,7 @@ def derive_area_label_state(record, features_window, window,
     """Derive the reusable four-state label mask for one area.
 
     Returns (mask, counts, info) with codes unusable 0, withheld 1, water 2
-    and non-water 3. Validity comes from the final six-feature vector: every
+    and non-water 3. Validity comes from the final classifier feature vector: every
     required feature must be finite. Exclusions take precedence over both
     explicit classes and derived background. Water/non-water overlaps raise.
     """

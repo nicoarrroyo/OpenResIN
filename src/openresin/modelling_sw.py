@@ -36,7 +36,8 @@ EXPECTED_AGGREGATION = "valid median within date, then median across dates"
 ROOT_SEED = 202604
 WATER_POLYGON_CAP = 100
 WATER_AREA_CAP = 1000
-WATER_THRESHOLD = 0.5
+NONWATER_PER_WATER = 5
+WATER_THRESHOLD = 0.75
 PREPARATION_SCHEMA_VERSION = 1
 MODEL_SCHEMA_VERSION = 1
 METRICS_SCHEMA_VERSION = 1
@@ -488,16 +489,27 @@ def _select_capped_water(record, water_owner, polygon_rows, generator):
 
 def _sample_matching_nonwater(record, label_mask, nonwater_owner,
                               water_count, generator):
-    """Draw the fixed 1:1 non-water sample from the same area."""
+    """Draw five non-water pixels per water pixel in three fixed stages."""
     nonwater_candidates = np.flatnonzero(
         label_mask.reshape(-1) == label_sw.LABEL_NONWATER)
-    if len(nonwater_candidates) < water_count:
+    nonwater_count = NONWATER_PER_WATER * water_count
+    if len(nonwater_candidates) < nonwater_count:
         raise ValueError(
             f"area {record['area_id']:03d} has {water_count} selected "
             f"water pixels but only {len(nonwater_candidates)} eligible "
-            "non-water pixels")
+            f"non-water pixels; need {nonwater_count}")
     nonwater_pixels = generator.choice(
         nonwater_candidates, size=water_count, replace=False)
+    # Keep the fixed staged draw order for reproducible sampling.
+    remaining = np.setdiff1d(nonwater_candidates, nonwater_pixels)
+    additional = generator.choice(
+        remaining, size=2 * water_count, replace=False)
+    nonwater_pixels = np.concatenate((nonwater_pixels, additional))
+    # The second extension completes the required 1:5 ratio.
+    remaining = np.setdiff1d(nonwater_candidates, nonwater_pixels)
+    extra = generator.choice(
+        remaining, size=2 * water_count, replace=False)
+    nonwater_pixels = np.concatenate((nonwater_pixels, extra))
     nonwater_polygon_indices = nonwater_owner.reshape(-1)[nonwater_pixels]
     return nonwater_pixels, nonwater_polygon_indices, nonwater_candidates
 
@@ -520,7 +532,7 @@ def _training_sampling_report(record, label_mask, label_counts,
         },
         "nonwater": {
             "eligible": nonwater_eligible,
-            "selected": water_count,
+            "selected": NONWATER_PER_WATER * water_count,
         },
     }
 
@@ -619,9 +631,10 @@ def build_datasets(validated, contract=BASELINE_CONTRACT):
     for area_id in contract.train_area_ids:
         area_labels = train["y"][train["area"] == area_id]
         counts = np.bincount(area_labels, minlength=2)
-        if counts[0] != counts[1] or counts[0] == 0:
+        if counts[0] != NONWATER_PER_WATER * counts[1] or counts[0] == 0:
             raise AssertionError(
-                f"training area {area_id:03d} is not non-empty and balanced")
+                f"training area {area_id:03d} does not have "
+                "non-empty 1:5 classes")
     return train, test, sampling_reports
 
 
@@ -711,7 +724,7 @@ def _build_manifest(validated, train, test, reports, contract,
         "feature_order": list(c.SW_FEATURES),
         "aggregation": validated.provenance["aggregation"],
         "masks": validated.provenance["masks"],
-        "validity": "all six saved feature values are finite",
+        "validity": "all required saved feature values are finite",
         "label_mapping": {
             "source_codes": {
                 "unusable": label_sw.LABEL_UNUSABLE,
@@ -737,14 +750,18 @@ def _build_manifest(validated, train, test, reports, contract,
             "without_replacement": True,
             "water_polygon_cap": WATER_POLYGON_CAP,
             "water_area_cap": WATER_AREA_CAP,
-            "nonwater_rule": "match selected water count within each area",
+            "nonwater_per_water": NONWATER_PER_WATER,
+            "nonwater_rule": (
+                "draw matching water count, then two successive draws "
+                "of twice water count from remaining pixels per area"),
             "test_rule": "all eligible labelled pixels; no RNG draws",
             "reports": reports,
         },
         "probability": {
-            "meaning": "uncalibrated RF water probability from balanced training",
+            "meaning": ("uncalibrated RF water probability from "
+                        "1:5 water:non-water training"),
             "threshold": WATER_THRESHOLD,
-            "tie_rule": "water when probability >= 0.5",
+            "tie_rule": f"water when probability >= {WATER_THRESHOLD}",
         },
         "model": {
             "requested": {
@@ -772,7 +789,7 @@ def _build_manifest(validated, train, test, reports, contract,
             "Spatial caps reduce dominance but do not remove correlation.",
             "The frozen split prevents pixel overlap but does not establish "
             "statistical independence.",
-            "The balanced-training probability is not calibrated to natural "
+            "The 1:5-training probability is not calibrated to natural "
             "water prevalence.",
             "Completion can include missed water in the derived non-water "
             "background.",
@@ -887,6 +904,10 @@ def _check_manifest_contract(manifest, contract):
     _require_equal(
         "manifest test split", sorted(split.get("test", [])),
         sorted(contract.test_area_ids))
+    _require_equal(
+        "manifest nonwater_per_water",
+        (manifest.get("sampling") or {}).get("nonwater_per_water"),
+        NONWATER_PER_WATER)
     probability = manifest.get("probability") or {}
     _require_equal(
         "manifest threshold", probability.get("threshold"), WATER_THRESHOLD)
@@ -925,7 +946,8 @@ def _validate_dataset_content(dataset, dataset_name):
     """Require finite features, binary targets and integer provenance."""
     if dataset["X"].ndim != 2 or dataset["X"].shape[1] != len(c.SW_FEATURES):
         raise ValueError(
-            f"{dataset_name} X is {dataset['X'].shape}, expected (N, 6)")
+            f"{dataset_name} X is {dataset['X'].shape}, "
+            f"expected (N, {len(c.SW_FEATURES)})")
     if dataset["X"].dtype != np.float32:
         raise ValueError(
             f"{dataset_name} X dtype is {dataset['X'].dtype}, "
@@ -958,7 +980,7 @@ def _require_exact_areas(dataset, expected_area_ids, dataset_name):
 
 
 def _validate_training_balance(dataset):
-    """Require two non-empty balanced classes in every training area."""
+    """Require non-water count = five times water count in each area."""
     for area_id in sorted(np.unique(dataset["area"]).tolist()):
         area_labels = dataset["y"][dataset["area"] == area_id]
         counts = np.bincount(area_labels, minlength=2)
@@ -967,9 +989,10 @@ def _validate_training_balance(dataset):
                 f"training area {int(area_id):03d} is single-class: "
                 f"counts [non-water={int(counts[0])}, "
                 f"water={int(counts[1])}]")
-        if counts[0] != counts[1]:
+        if counts[0] != NONWATER_PER_WATER * counts[1]:
             raise ValueError(
-                f"training area {int(area_id):03d} is unbalanced: "
+                f"training area {int(area_id):03d} does not have "
+                "the required 1:5 ratio: "
                 f"counts [non-water={int(counts[0])}, "
                 f"water={int(counts[1])}]")
     pixel_keys = list(zip(
@@ -984,7 +1007,7 @@ def fit_water_classifier(train_dataset, contract=None):
     Takes the training dataset alone. The test dataset must never be
     passed here; the fit action does not load it. An optional contract
     adds an exact-membership check; without one, every present area
-    must still be non-empty and balanced.
+    must still have non-empty 1:5 classes.
     """
     _validate_dataset_content(train_dataset, "training dataset")
     if contract is not None:
@@ -1017,7 +1040,7 @@ def _save_model_bundle(path, model, manifest_sha256, train_sha256,
         "model": model,
         "feature_order": list(c.SW_FEATURES),
         "threshold": WATER_THRESHOLD,
-        "tie_rule": "water when probability >= 0.5",
+        "tie_rule": f"water when probability >= {WATER_THRESHOLD}",
         "manifest_sha256": manifest_sha256,
         "train_dataset_sha256": train_sha256,
         "resolved_parameters": model.get_params(deep=False),
@@ -1146,7 +1169,8 @@ def water_probabilities(model, features):
     matrix = np.asarray(features, dtype=np.float32)
     if matrix.ndim != 2 or matrix.shape[1] != len(c.SW_FEATURES):
         raise ValueError(
-            f"feature matrix is {matrix.shape}, expected (N, 6)")
+            f"feature matrix is {matrix.shape}, "
+            f"expected (N, {len(c.SW_FEATURES)})")
     if not np.all(np.isfinite(matrix)):
         raise ValueError("feature matrix must be finite for prediction")
     water_column = classes.index(1)
@@ -1155,7 +1179,7 @@ def water_probabilities(model, features):
 
 
 def apply_water_threshold(probabilities):
-    """Apply the fixed >= 0.5 rule with exact ties counted as water."""
+    """Apply the fixed >= 0.75 rule with exact ties counted as water."""
     values = np.asarray(probabilities, dtype=np.float32)
     return (values >= np.float32(WATER_THRESHOLD)).astype(np.uint8)
 
@@ -1299,7 +1323,7 @@ def _area_window_transform(base_transform, window):
 
 
 def _stack_valid_features(feature_window):
-    """Stack one window's six features and mark the finite pixels."""
+    """Stack one window's classifier features and mark the finite pixels."""
     first_shape = next(iter(feature_window.values())).shape
     height, width = int(first_shape[0]), int(first_shape[1])
     for name in c.SW_FEATURES:
@@ -1364,9 +1388,10 @@ def _geotiff_tags(manifest, manifest_sha256, model_sha256, area_id, window):
         "aggregation": str(manifest.get("aggregation", "")),
         "validity": str(manifest.get("validity", "")),
         "threshold": str(WATER_THRESHOLD),
-        "tie_rule": "water when probability >= 0.5",
+        "tie_rule": f"water when probability >= {WATER_THRESHOLD}",
         "probability_meaning": (
-            "uncalibrated RF water probability from balanced training"),
+            "uncalibrated RF water probability from "
+            "1:5 water:non-water training"),
         "manifest_sha256": str(manifest_sha256),
         "model_sha256": str(model_sha256),
     }
@@ -1477,7 +1502,7 @@ def write_prediction_overlay(path, area_id, month, ndwi_window,
     axes[2].imshow(truth_display)
     axes[2].set_title("held-out labels (blue/orange)")
     figure.suptitle(f"area {int(area_id):03d} — {month} — "
-                    "uncalibrated RF water probability >= 0.5")
+                    f"uncalibrated RF water probability >= {WATER_THRESHOLD}")
     legend_items = [
         (patches.Patch(color="#1e90ff"), "water / predicted water"),
         (patches.Patch(color="#ff8c00"), "labelled non-water"),
@@ -1681,11 +1706,9 @@ def evaluate_run(input_dir, run_dir, source_image_root,
                 "retry-after-partial-export"
                 if metrics_path.exists() else "initial"),
             "held_out_exposure": (
-                "Held-out predictions and scores were first generated "
-                "in this evaluation. Engineering and file-integrity "
-                "checks do not count as exposure; any later bug fix "
-                "that changes sampling, labels, features, predictions "
-                "or scoring must call its result test-exposed."),
+                "This method was selected using earlier held-out results. "
+                "Its scores are test-exposed exploratory results, "
+                "not an independent validation of the selected method."),
             "tile": contract.tile,
             "month": contract.month,
             "identities": {
@@ -1697,9 +1720,10 @@ def evaluate_run(input_dir, run_dir, source_image_root,
             },
             "feature_order": list(c.SW_FEATURES),
             "threshold": WATER_THRESHOLD,
-            "tie_rule": "water when probability >= 0.5",
+            "tie_rule": f"water when probability >= {WATER_THRESHOLD}",
             "probability_meaning": (
-                "uncalibrated RF water probability from balanced training"),
+                "uncalibrated RF water probability from "
+                "1:5 water:non-water training"),
             "confusion_convention": scoring["confusion_convention"],
             "per_area": scoring["per_area"],
             "pooled": scoring["pooled"],

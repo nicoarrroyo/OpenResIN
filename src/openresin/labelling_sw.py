@@ -11,9 +11,13 @@ import re
 import sys
 import tempfile
 import warnings
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import rasterio
+from rasterio.enums import Resampling
+from rasterio.warp import reproject
+from rasterio.windows import Window
 
 from . import config as c
 from . import image_handling as image_do
@@ -254,6 +258,115 @@ def mask_scene_bands(scene, cloud_mask):
         band[cloudy | invalid] = np.nan
         masked_bands[key] = band
     return masked_bands
+
+
+def reflectance_metadata(scene_dir):
+    """Read L2A quantification and per-band offsets for added features."""
+    metadata_path = os.path.join(scene_dir, "MTD_MSIL2A.xml")
+    root = ET.parse(metadata_path).getroot()
+    # Match local names also when the product uses XML namespaces.
+    for element in root.iter():
+        element.tag = element.tag.split("}")[-1]
+    quantification = float(root.find(".//BOA_QUANTIFICATION_VALUE").text)
+    if not np.isfinite(quantification) or quantification <= 0:
+        raise ValueError(f"invalid BOA quantification in {metadata_path}")
+    offsets = {int(element.attrib["band_id"]): float(element.text)
+               for element in root.findall(".//BOA_ADD_OFFSET")}
+    band_ids = {"B03": 2, "B11": 11, "B12": 12,
+                "B05": 4, "B06": 5, "B07": 6, "B8A": 8}
+    # Older products have no offsets; their BOA conversion uses zero.
+    if offsets and any(band_id not in offsets
+                       for band_id in band_ids.values()):
+        raise ValueError(f"incomplete BOA offsets in {metadata_path}")
+    band_offsets = {band: offsets.get(band_id, 0.0)
+                    for band, band_id in band_ids.items()}
+    if not all(np.isfinite(value) for value in band_offsets.values()):
+        raise ValueError(f"non-finite BOA offsets in {metadata_path}")
+    return {
+        "scene": os.path.basename(scene_dir),
+        "quantification": quantification,
+        "offsets": band_offsets,
+        "metadata_sha256": file_sha256(metadata_path),
+    }
+
+
+def resample_20m_band(source, reference, window, cloud_mask):
+    """Mask native footprints, then bilinearly align a band to B03."""
+    if (source.crs != reference.crs
+            or source.width * 2 != reference.width
+            or source.height * 2 != reference.height
+            or source.transform != reference.transform
+            * rasterio.Affine.scale(2)):
+        raise ValueError("20 m band does not align with the B03 10 m grid")
+    if cloud_mask.shape != (reference.height, reference.width):
+        raise ValueError("cloud mask does not match the B03 10 m grid")
+    row0, row1, col0, col1 = window
+    # One native-pixel halo supplies bilinear neighbours at crop edges.
+    row_start = max(0, row0 // 2 - 1)
+    row_end = min(source.height, (row1 + 1) // 2 + 1)
+    col_start = max(0, col0 // 2 - 1)
+    col_end = min(source.width, (col1 + 1) // 2 + 1)
+    source_window = Window(col_start, row_start,
+                           col_end - col_start, row_end - row_start)
+    dn = source.read(1, window=source_window).astype(np.float32)
+    cloud10 = cloud_mask[2 * row_start:2 * row_end,
+                         2 * col_start:2 * col_end]
+    cloud20 = np.isin(cloud10, c.SW_CLOUD_SHADOW_CLASSES).reshape(
+        row_end - row_start, 2, col_end - col_start, 2).any(axis=(1, 3))
+    dn[(dn == 0) | cloud20] = np.nan
+    target = np.full((row1 - row0, col1 - col0), np.nan, np.float32)
+    target_window = Window(col0, row0, col1 - col0, row1 - row0)
+    reproject(
+        source=dn, destination=target,
+        src_transform=source.window_transform(source_window),
+        src_crs=source.crs, src_nodata=np.nan,
+        dst_transform=reference.window_transform(target_window),
+        dst_crs=reference.crs, dst_nodata=np.nan,
+        resampling=Resampling.bilinear)
+    return target
+
+
+def added_scene_features(scene_dir, scene, cloud_mask):
+    """Build MNDWI and six 20 m reflectance bands on the 10 m grid.
+
+    The original four bands and NDWI/NDVI retain their DN representation.
+    Added bands use BOA reflectance, including negative finite values.
+    """
+    metadata = reflectance_metadata(scene_dir)
+    quantification = metadata["quantification"]
+    offsets = metadata["offsets"]
+    img10 = granule_img_data(scene_dir, "R10m")
+    img20 = granule_img_data(scene_dir, "R20m")
+    green_names = [name for name in sorted(os.listdir(img10))
+                   if name.endswith("_B03_10m.jp2")]
+    if len(green_names) != 1:
+        raise FileNotFoundError(f"expected one 10 m B03 in {img10}")
+    prefix = green_names[0].replace("_B03_10m.jp2", "")
+    features = {}
+    destination_invalid = np.isin(cloud_mask, c.SW_CLOUD_SHADOW_CLASSES)
+    destination_invalid |= scene["green"] == 0
+    with rasterio.open(os.path.join(img10, green_names[0])) as reference:
+        for band in ("B11", "B12", "B05", "B06", "B07", "B8A"):
+            path = os.path.join(img20, f"{prefix}_{band}_20m.jp2")
+            values = np.full(cloud_mask.shape, np.nan, np.float32)
+            with rasterio.open(path) as source:
+                # Bound interpolation memory and retain exact grid-cell crops.
+                for row0 in range(0, reference.height, c.SW_CELL_PX):
+                    row1 = min(row0 + c.SW_CELL_PX, reference.height)
+                    for col0 in range(0, reference.width, c.SW_CELL_PX):
+                        col1 = min(col0 + c.SW_CELL_PX, reference.width)
+                        dn = resample_20m_band(
+                            source, reference, (row0, row1, col0, col1),
+                            cloud_mask)
+                        values[row0:row1, col0:col1] = (
+                            dn + offsets[band]) / quantification
+            values[destination_invalid | ~np.isfinite(values)] = np.nan
+            features[band] = values
+    green = (scene["green"] + offsets["B03"]) / quantification
+    green[destination_invalid] = np.nan
+    features["MNDWI"] = calculate_ndwi(green, features["B11"])
+    features["MNDWI"][~np.isfinite(features["MNDWI"])] = np.nan
+    return features, metadata
 
 
 # %% 3. Calculate spectral indices

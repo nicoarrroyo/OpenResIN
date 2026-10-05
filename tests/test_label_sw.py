@@ -295,7 +295,7 @@ def test_load_masked_ndwi_window_requires_both_masks_on_disk(
 
 
 def _write_full_features(out_dir, scenes, values, sea_path, urban_path):
-    """Save all six features on a tiny tile with matching provenance."""
+    """Save all classifier features on a tiny tile with matching provenance."""
     provenance = {
         "tile": "T31UCU",
         "month": "2026-04",

@@ -256,6 +256,127 @@ def test_calculate_ndwi_handles_values_zero_sum_and_nodata():
     assert np.isnan(ndwi[0, 2])
 
 
+def _write_spectral_scene(scene_dir, green_dn=4000, swir_dn=2000):
+    """Write aligned tiny rasters and metadata with real BOA offsets."""
+    transform = rasterio.Affine(10, 0, 300000, 0, -10, 5900040)
+    img_data = scene_dir / "GRANULE" / "fixture" / "IMG_DATA"
+    for band in ("B03", "B11", "B12", "B05", "B06", "B07", "B8A"):
+        resolution = 10 if band == "B03" else 20
+        size = 8 if resolution == 10 else 4
+        folder = img_data / f"R{resolution}m"
+        folder.mkdir(parents=True, exist_ok=True)
+        value = green_dn if band == "B03" else swir_dn
+        if band == "B12":
+            value = 500  # negative reflectance must survive
+        with rasterio.open(
+                folder / f"fixture_{band}_{resolution}m.jp2", "w",
+                driver="GTiff", height=size, width=size, count=1,
+                dtype="uint16", crs="EPSG:32631",
+                transform=transform * rasterio.Affine.scale(resolution / 10)
+                ) as destination:
+            destination.write(np.full((size, size), value, np.uint16), 1)
+    offsets = "".join(
+        f'<BOA_ADD_OFFSET band_id="{band_id}">-1000</BOA_ADD_OFFSET>'
+        for band_id in (2, 4, 5, 6, 8, 11, 12))
+    (scene_dir / "MTD_MSIL2A.xml").write_text(
+        '<metadata xmlns="urn:fixture"><BOA_QUANTIFICATION_VALUE>'
+        f'10000</BOA_QUANTIFICATION_VALUE>{offsets}</metadata>')
+    return {key: np.full((8, 8), green_dn, np.float32)
+            for key in ("blue", "green", "red", "nir")}
+
+
+def test_added_features_use_offsets_and_mask_native_cloud_footprints(
+        tmp_path, monkeypatch):
+    scene_dir = tmp_path / "scene.SAFE"
+    scene = _write_spectral_scene(scene_dir)
+    monkeypatch.setattr(sw.c, "SW_CELL_PX", 4)
+    cloud = np.zeros((8, 8), np.uint8)
+    cloud[2, 2] = 1  # whole parent footprint must be excluded
+    scene["green"][0, 0] = 0  # destination NoData
+    band_path = (scene_dir / "GRANULE/fixture/IMG_DATA/R20m/"
+                 "fixture_B11_20m.jp2")
+    with rasterio.open(band_path, "r+") as destination:
+        values = destination.read(1)
+        values[0, 3] = 0  # native NoData must be masked before conversion
+        destination.write(values, 1)
+
+    features, metadata = sw.added_scene_features(scene_dir, scene, cloud)
+
+    assert metadata["offsets"]["B03"] == -1000
+    assert metadata["metadata_sha256"] == sw.file_sha256(
+        scene_dir / "MTD_MSIL2A.xml")
+    assert features["MNDWI"][7, 7] == pytest.approx(0.5)
+    assert features["B11"][7, 7] == pytest.approx(0.1)
+    assert features["B12"][7, 7] == pytest.approx(-0.05)
+    for values in features.values():
+        assert values.dtype == np.float32
+        assert np.isnan(values[0, 0])
+        assert np.isnan(values[2:4, 2:4]).all()
+    assert np.isnan(features["B11"][0:2, 6:8]).all()
+
+    # Chunk edges must not change the interpolation result.
+    monkeypatch.setattr(sw.c, "SW_CELL_PX", 8)
+    full_features, _ = sw.added_scene_features(scene_dir, scene, cloud)
+    for name in features:
+        np.testing.assert_array_equal(features[name], full_features[name])
+
+
+def test_resampling_rejects_misaligned_native_grid(tmp_path):
+    scene_dir = tmp_path / "scene.SAFE"
+    _write_spectral_scene(scene_dir)
+    img_data = scene_dir / "GRANULE/fixture/IMG_DATA"
+    with rasterio.open(img_data / "R20m/fixture_B11_20m.jp2", "r+") as band:
+        band.transform = rasterio.Affine(20, 0, 300010, 0, -20, 5900040)
+    with rasterio.open(img_data / "R20m/fixture_B11_20m.jp2") as band, \
+            rasterio.open(img_data / "R10m/fixture_B03_10m.jp2") as reference:
+        with pytest.raises(ValueError, match="does not align"):
+            sw.resample_20m_band(
+                band, reference, (0, 8, 0, 8), np.zeros((8, 8), np.uint8))
+
+
+def test_monthly_builder_saves_all_features_with_date_balanced_indices(
+        tmp_path, monkeypatch):
+    from openresin import label_sw
+
+    scenes = []
+    scene_arrays = {}
+    for date, suffix, green, swir in (
+            ("20260427", "A", 4000, 2000),
+            ("20260427", "B", 4000, 4000),
+            ("20260430", "C", 4000, 7000)):
+        scene_dir = tmp_path / (
+            f"S2A_MSIL2A_{date}T110651_N0512_R137_T31UCU_{suffix}.SAFE")
+        scene = _write_spectral_scene(scene_dir, green, swir)
+        scene["meta"] = {"crs": "EPSG:32631"}
+        # NoData in an old feature must mask the added monthly features.
+        scene["blue"][0, 0] = np.nan
+        scene_arrays[str(scene_dir)] = scene
+        scenes.append(str(scene_dir))
+    monkeypatch.setattr(sw, "read_scene_10m", scene_arrays.__getitem__)
+    monkeypatch.setattr(sw, "predict_cloud_mask",
+                        lambda *args, **kwargs: np.zeros((8, 8), np.uint8))
+    monkeypatch.setattr(label_sw, "_find_known_feature_masks",
+                        lambda: (None, None))
+    out_dir = tmp_path / "features"
+
+    label_sw._create_monthly_features(str(out_dir), scenes, "cpu", "2026-04")
+
+    with np.load(out_dir / "features.npz") as archive:
+        assert set(archive.files) == set(sw.c.SW_FEATURES) | {"valid_count"}
+        # Daily MNDWI medians: (0.5 + 0)/2 and -1/3.
+        assert archive["MNDWI"][7, 7] == pytest.approx((0.25 - 1 / 3) / 2)
+        assert archive["B11"][7, 7] == pytest.approx(0.4)
+        assert archive["B03"][7, 7] == 4000  # original DN kept
+        assert archive["B12"][7, 7] == pytest.approx(-0.05)
+        assert archive["valid_count"][7, 7] == 2
+        for name in ("MNDWI", "B11", "B12", "B05", "B06", "B07", "B8A"):
+            assert np.isnan(archive[name][0, 0])
+    import json
+    provenance = json.loads((out_dir / "features-provenance.json").read_text())
+    assert provenance["feature_order"] == list(sw.c.SW_FEATURES)
+    assert len(provenance["spectral_method"]["scene_metadata"]) == 3
+
+
 def test_read_band_window_reads_requested_10m_pixels_as_float32(tmp_path):
     """Band quicklooks read only the requested source window."""
     image_dir = (

@@ -28,7 +28,8 @@ SW_OCM_PATCH_OVERLAP = 300
 SW_OCM_BATCH_SIZE = 4
 SW_OCM_DTYPE = "bf16"
 SW_OCM_DEVICE = "cuda"   # falls back to CPU with a warning when unavailable
-SW_FEATURES = ("B02", "B03", "B04", "B08", "NDWI", "NDVI")  # classifier order
+SW_FEATURES = ("B02", "B03", "B04", "B08", "NDWI", "NDVI", "MNDWI",
+               "B11", "B12", "B05", "B06", "B07", "B8A")  # classifier order
 
 # --- Paths ---
 # Anchored on this file's location, never on the working directory, so the

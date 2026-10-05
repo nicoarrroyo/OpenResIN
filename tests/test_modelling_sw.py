@@ -61,8 +61,8 @@ def _rectangle(col0, row0, col1, row1, class_name="water", polygon_id=1):
 def test_training_sampler_applies_both_caps_and_keeps_provenance(monkeypatch):
     monkeypatch.setattr(modelling_sw, "WATER_POLYGON_CAP", 4)
     monkeypatch.setattr(modelling_sw, "WATER_AREA_CAP", 5)
-    window = [0, 5, 0, 5]
-    features = _features((5, 5), invalid=(4, 4))
+    window = [0, 6, 0, 6]
+    features = _features((6, 6), invalid=(4, 4))
     record = _record(7, "train", window, [
         _rectangle(0, 0, 3, 2, polygon_id=11),
         _rectangle(2, 0, 5, 2, polygon_id=12),
@@ -74,8 +74,8 @@ def test_training_sampler_applies_both_caps_and_keeps_provenance(monkeypatch):
 
     assert np.array_equal(first["X"], second["X"])
     assert first["X"].dtype == np.float32
-    assert first["X"].shape == (10, 6)
-    assert np.array_equal(np.bincount(first["y"], minlength=2), [5, 5])
+    assert first["X"].shape == (30, 13)
+    assert np.array_equal(np.bincount(first["y"], minlength=2), [25, 5])
     for position, _name in enumerate(c.SW_FEATURES, start=1):
         assert np.array_equal(
             first["X"][:, position - 1],
@@ -106,7 +106,7 @@ def test_test_sampler_uses_all_labels_and_explicit_background_provenance():
 
     dataset, report = modelling_sw.sample_test_area(record, features)
 
-    assert dataset["X"].shape == (7, 6)
+    assert dataset["X"].shape == (7, 13)
     assert report["eligible"] == 7
     assert set(dataset["y"]) == {0, 1}
     explicit = (dataset["row"] == 11) & (dataset["col"] == 20)
@@ -133,17 +133,17 @@ def _write_preparation_fixture(tmp_path, monkeypatch):
     source_root = tmp_path / "sat-images"
     input_dir.mkdir(parents=True)
     source_root.mkdir()
-    monkeypatch.setattr(c, "SW_TILE_PX", 16)
-    monkeypatch.setattr(c, "SW_CELL_PX", 2)
+    monkeypatch.setattr(c, "SW_TILE_PX", 24)
+    monkeypatch.setattr(c, "SW_CELL_PX", 3)
     monkeypatch.setattr(c, "SW_GRID_ROWS", 8)
     monkeypatch.setattr(c, "SW_GRID_COLS", 8)
     transform = Affine(10, 0, 300000, 0, -10, 5900040)
     for scene in SCENES:
         _write_reference_scene(
-            source_root, scene, (16, 16), transform, "EPSG:32631")
+            source_root, scene, (24, 24), transform, "EPSG:32631")
 
-    arrays = _features((16, 16))
-    arrays["valid_count"] = np.ones((16, 16), dtype=np.int16)
+    arrays = _features((24, 24))
+    arrays["valid_count"] = np.ones((24, 24), dtype=np.int16)
     np.savez_compressed(input_dir / "features.npz", **arrays)
     provenance = {
         "tile": "T31UCU",
@@ -189,7 +189,7 @@ def _write_preparation_fixture(tmp_path, monkeypatch):
                 "id": area_id, "split": split, "window": window})
     areas = {
         "tile": "T31UCU",
-        "grid": {"cell_px": 2, "rows": 8, "cols": 8},
+        "grid": {"cell_px": 3, "rows": 8, "cols": 8},
         "areas": area_entries,
     }
     (input_dir / "areas.json").write_text(
@@ -219,24 +219,25 @@ def test_prepare_roundtrip_validates_inputs_and_refuses_overwrite(
         "prepare-complete.json", "v1-sampling.json", "v1-test.npz",
         "v1-train.npz"]
     with np.load(run_dir / "v1-train.npz", allow_pickle=False) as train:
-        assert train["X"].shape == (16, 6)
+        assert train["X"].shape == (48, 13)
         assert train["X"].dtype == np.float32
         assert train["y"].dtype == np.uint8
         assert np.array_equal(np.unique(train["area"]), TRAIN_IDS)
         train_keys = set(zip(train["row"].tolist(), train["col"].tolist()))
     with np.load(run_dir / "v1-test.npz", allow_pickle=False) as test:
-        assert test["X"].shape == (16, 6)
+        assert test["X"].shape == (36, 13)
         assert np.array_equal(np.unique(test["area"]), TEST_IDS)
         test_keys = set(zip(test["row"].tolist(), test["col"].tolist()))
         assert train_keys.isdisjoint(test_keys)
     assert manifest["feature_order"] == list(c.SW_FEATURES)
     assert manifest["grid_reference"]["transform"] == [
         10.0, 0.0, 300000.0, 0.0, -10.0, 5900040.0]
-    assert manifest["datasets"]["train"]["rows"] == 16
+    assert manifest["datasets"]["train"]["rows"] == 48
     assert manifest["datasets"]["train"]["path"] == str(
         (run_dir / "v1-train.npz").resolve())
     assert manifest["model"]["requested"]["n_estimators"] == 100
-    assert manifest["probability"]["threshold"] == 0.5
+    assert manifest["sampling"]["nonwater_per_water"] == 5
+    assert manifest["probability"]["threshold"] == 0.75
     assert all(item["area_file_sha256"]
                for item in manifest["areas"])
 
@@ -331,7 +332,7 @@ def test_validate_rejects_wrong_feature_order_and_conflicting_grid(
     band_path = next(bad_scene.rglob("*_B02_10m.tif"))
     band_path.unlink()
     _write_reference_scene(
-        source_root, SCENES[-1], (16, 16),
+        source_root, SCENES[-1], (24, 24),
         Affine(10, 0, 300010, 0, -10, 5900040), "EPSG:32631")
 
     with pytest.raises(ValueError, match="reference grid"):
@@ -349,27 +350,43 @@ def test_sampling_fails_when_nonwater_cannot_match_water():
         modelling_sw.sample_training_area(record, features)
 
 
+def test_sampling_rejects_background_sufficient_only_for_old_balance():
+    record = _record(1, "train", [0, 2, 0, 2], [_rectangle(0, 0, 1, 1)])
+    with pytest.raises(ValueError, match="need 5"):
+        modelling_sw.sample_training_area(record, _features((2, 2)))
+
+
+def test_fit_rejects_manifest_with_old_training_ratio(tmp_path, monkeypatch):
+    input_dir, source_root, contract, run_dir, _ = _prepare_then_fit(
+        tmp_path, monkeypatch)
+    manifest_path = run_dir / "v1-sampling.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["sampling"]["nonwater_per_water"] = 1
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="nonwater_per_water"):
+        modelling_sw.fit_run(input_dir, run_dir, source_root, contract)
+
+
 # %% Step 2: fit, scores, rasters and end-to-end (issue 10).
 
-def _tiny_balanced_train():
+def _tiny_train():
     rng = np.random.default_rng(7)
-    water = rng.normal(2000, 50, size=(6, 6)).astype(np.float32)
-    land = rng.normal(1000, 50, size=(6, 6)).astype(np.float32)
-    stacked = np.vstack((water, land))
-    # Interleave water and land so both areas below stay balanced.
-    order = np.array([0, 6, 1, 7, 2, 8, 3, 9, 4, 10, 5, 11])
+    water = rng.normal(2000, 50, size=(6, 13)).astype(np.float32)
+    land = rng.normal(1000, 50, size=(30, 13)).astype(np.float32)
+    # Each area has three water and fifteen non-water rows.
+    matrix = np.vstack((water[:3], land[:15], water[3:], land[15:]))
     return {
-        "X": stacked[order],
-        "y": np.tile(np.array([1, 0], dtype=np.uint8), 6),
-        "area": np.repeat(np.array([1, 3], dtype=np.int32), 6),
-        "row": np.arange(12, dtype=np.int32),
-        "col": np.arange(12, dtype=np.int32),
-        "polygon_index": np.ones(12, dtype=np.int32),
+        "X": matrix,
+        "y": np.array(([1] * 3 + [0] * 15) * 2, dtype=np.uint8),
+        "area": np.repeat(np.array([1, 3], dtype=np.int32), 18),
+        "row": np.arange(36, dtype=np.int32),
+        "col": np.arange(36, dtype=np.int32),
+        "polygon_index": np.ones(36, dtype=np.int32),
     }
 
 
-def test_threshold_counts_exact_half_as_water():
-    probabilities = np.array([0.49, 0.5, 0.5001, 0.0, 1.0], dtype=np.float64)
+def test_threshold_counts_exact_three_quarters_as_water():
+    probabilities = np.array([0.7499, 0.75, 0.7501, 0.0, 1.0], dtype=np.float64)
     binary = modelling_sw.apply_water_threshold(probabilities)
 
     assert binary.dtype == np.uint8
@@ -428,7 +445,7 @@ def test_pooled_metrics_sum_counts_not_area_means():
 
 
 def test_tiny_forest_fits_reloads_and_shares_one_convention(tmp_path):
-    train = _tiny_balanced_train()
+    train = _tiny_train()
 
     model = modelling_sw.fit_water_classifier(train)
     assert list(model.classes_.tolist()) == [0, 1]
@@ -438,7 +455,7 @@ def test_tiny_forest_fits_reloads_and_shares_one_convention(tmp_path):
     assert probabilities.dtype == np.float32
     assert binary.dtype == np.uint8
     assert np.array_equal(
-        binary, (probabilities >= np.float32(0.5)).astype(np.uint8))
+        binary, (probabilities >= np.float32(0.75)).astype(np.uint8))
     assert np.all((probabilities >= 0.0) & (probabilities <= 1.0))
 
     manifest_stub = {"model": {"requested": {
@@ -454,24 +471,24 @@ def test_tiny_forest_fits_reloads_and_shares_one_convention(tmp_path):
     assert np.array_equal(binary, reloaded_binary)
 
 
-def test_fit_rejects_single_class_and_unbalanced():
-    balanced = _tiny_balanced_train()
-    single = {**balanced,
-              "y": np.zeros(12, dtype=np.uint8)}
+def test_fit_rejects_single_class_and_wrong_ratio():
+    train = _tiny_train()
+    single = {**train,
+              "y": np.zeros(36, dtype=np.uint8)}
     with pytest.raises(ValueError, match="single-class"):
         modelling_sw.fit_water_classifier(single)
 
-    unbalanced = {**balanced,
-                  "y": np.array([1, 1, 1, 1, 0, 0] * 2, dtype=np.uint8)}
-    with pytest.raises(ValueError, match="unbalanced"):
-        modelling_sw.fit_water_classifier(unbalanced)
+    wrong_ratio = {**train,
+                  "y": np.array(([1] * 4 + [0] * 14) * 2, dtype=np.uint8)}
+    with pytest.raises(ValueError, match="required 1:5 ratio"):
+        modelling_sw.fit_water_classifier(wrong_ratio)
 
 
 def test_fit_rejects_nonfinite_features_and_wrong_manifest_order(
         tmp_path, monkeypatch):
-    balanced = _tiny_balanced_train()
-    nonfinite = {**balanced,
-                 "X": balanced["X"].copy()}
+    train = _tiny_train()
+    nonfinite = {**train,
+                 "X": train["X"].copy()}
     nonfinite["X"][0, 0] = np.nan
     with pytest.raises(ValueError, match="must be finite"):
         modelling_sw.fit_water_classifier(nonfinite)
@@ -532,7 +549,7 @@ def test_raster_roundtrip_keeps_offset_transform_and_nodata(tmp_path):
     window = [10, 13, 20, 23]
     probability_grid = np.array([
         [0.1, 0.9, np.nan],
-        [0.2, 0.5, 0.8],
+        [0.2, 0.75, 0.8],
         [np.nan, 0.0, 1.0],
     ], dtype=np.float32)
     binary_grid = np.array([
@@ -652,9 +669,9 @@ def test_prepare_fit_evaluate_end_to_end_and_refuses_repeated_evaluate(
 
     assert labelling_sw.file_sha256(manifest_path) == manifest_before
     assert metrics["tile"] == "T31UCU"
-    assert metrics["threshold"] == 0.5
+    assert metrics["threshold"] == 0.75
     assert sorted(metrics["per_area"]) == ["41", "43", "45", "47"]
-    assert metrics["pooled"]["rows"] == 16
+    assert metrics["pooled"]["rows"] == 36
     json.dumps(metrics, allow_nan=False)
 
     expected_files = {"v1-model.pkl", "fit-complete.json",
@@ -732,7 +749,7 @@ def test_export_failure_keeps_scores_and_retry_finishes_run(
     assert metrics_path.is_file()
     first_metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     metrics_digest = labelling_sw.file_sha256(metrics_path)
-    assert first_metrics["pooled"]["rows"] == 16
+    assert first_metrics["pooled"]["rows"] == 36
     assert not (run_dir / "evaluate-complete.json").exists()
     failures_path = run_dir / "evaluate-failures.jsonl"
     failures = [json.loads(line) for line in failures_path.read_text(
