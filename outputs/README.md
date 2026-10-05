@@ -12,6 +12,7 @@ Nothing in here is tracked by git except this README (see `.gitignore` in the re
 ```
 outputs/
 ├── chunks/         # Mini-chunk PNGs cut for prediction, one folder per scene
+├── label-water/    # Surface-water features, labels and prepared run folders
 ├── labels/         # Label coordinates from your own labelling sessions
 ├── patches/        # Segmented training images, one folder per class
 │   ├── land/
@@ -28,6 +29,12 @@ outputs/
 > The naming convention for the `.csv` file may change, but the code must (and would) be changed first / accordingly. 
 
 **Relationship to `data/seed-labels/`:** the repository ships with a hand-labelled seed file so that a fresh clone can produce training images without sitting through a labelling session first. The seed is copied here and appended to, but the original file is never edited, only read. This should preserve the idea that two different machines can clone the same repo and get the same results on the first run. 
+
+## `label-water/`
+
+`openresin-label-sw` writes the experimental monthly feature archive, frozen area split, and polygon records here. `openresin-train-sw prepare` reads those files without changing them and publishes a new run under a destination you choose, normally `outputs/label-water/runs/<run-id>/`.
+
+A prepared run contains `v1-train.npz`, `v1-test.npz`, `v1-sampling.json`, and `prepare-complete.json`. The manifest records input and dataset digests, feature and label meanings, sample provenance, fixed random-forest settings, package versions, and the source-derived grid reference. `fit` adds `v1-model.pkl` and `fit-complete.json` without touching the test dataset or the frozen manifest. `evaluate` adds `v1-metrics.json`, four `area-XXX-water-probability.tif` / `area-XXX-water-binary.tif` pairs, one `area-XXX-overlay.png` per test area, and `evaluate-complete.json`. Probability is float32 in [0, 1] with NoData -9999.0; binary is uint8 0/1 with NoData 255. Do not edit a prepared or fitted run in place; use a new run ID if the inputs or implementation change. Completed scores are saved before export. An export failure keeps `v1-metrics.json`, appends a record to `evaluate-failures.jsonl`, and leaves `evaluate-complete.json` absent. Retry `evaluate` on the same fitted run to preserve identical scores and finish missing exports. A failed `fit` can leave a model without its completion marker, so inspect the run before retrying it.
 
 ## `patches/`
 NALIRA's segmentation step cuts the labelled regions out of the NDWI array and saves them here as 8-bit greyscale PNGs, sorted into one folder per class: `reservoirs`, `water-bodies`, `land`, and `sea`. These are the images the model is trained on.

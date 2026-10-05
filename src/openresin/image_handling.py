@@ -249,7 +249,7 @@ def plot_indices(data, size, save_image, folder_path, res):
     plt.title(f"Sentinel 2 NDWI R{res}", fontsize=8)
 
     ax = plt.gca()
-    plt.imshow(data)
+    plt.imshow(data, cmap=plt.get_cmap().with_extremes(bad="black"))
 
     ax.spines["left"].set_visible(False)
     ax.spines["bottom"].set_visible(False)
@@ -334,15 +334,17 @@ def plot_chunks(ndwi, index_chunks, plot_size_chunks, i,
 
     fig, axes = plt.subplots(2, 2, figsize=plot_size_chunks)
 
+    ndwi_cmap = plt.get_cmap().with_extremes(bad="black")
+
     # plot 1, top left: NDWI chunk (full resolution)
-    axes[0][0].imshow(index_chunk, norm=norm_ndwi)
+    axes[0][0].imshow(index_chunk, norm=norm_ndwi, cmap=ndwi_cmap)
     axes[0][0].set_title(f"{index_labels[0]} Chunk {i}",
                          fontsize=title_size)
     #axes[0][0].tick_params(axis="both", labelsize=label_size)
     axes[0][0].axis("off")
 
     # plot 2, top right: Adjusted NDWI chunk (merged resolution)
-    axes[0][1].imshow(index_chunk, norm=base_ndwi)
+    axes[0][1].imshow(index_chunk, norm=base_ndwi, cmap=ndwi_cmap)
     axes[0][1].set_title(f"{index_labels[1]} Chunk {i}",
                          fontsize=title_size)
     #axes[0][1].tick_params(axis="both", labelsize=label_size)
