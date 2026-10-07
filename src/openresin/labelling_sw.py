@@ -5,10 +5,10 @@ separate 10 m workflow.
 """
 
 import hashlib
+from contextlib import ExitStack
 import json
 import os
 import re
-import sys
 import tempfile
 import warnings
 import xml.etree.ElementTree as ET
@@ -405,64 +405,55 @@ def scene_indices(scene):
 
 # %% 4. Calculate monthly features
 def monthly_features(features_by_date):
-    """Take the valid median within each date, then across dates.
-
-    Also return the number of valid dates at each pixel. One valid date is
-    sufficient; zero valid dates means NoData.
-    """
-    feature_names = list(c.SW_FEATURES)
-    interactive_output = sys.stdout.isatty()
-
+    """Take date-first medians in blocks from arrays or cached NPY files."""
+    monthly = {}
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="All-NaN slice encountered",
             category=RuntimeWarning)
-
-        median_features_by_date = []
-        for date, date_features in features_by_date.items():
-            if len(date_features) == 1:
-                median_features_by_date.append(date_features[0])
-                continue
-
-            date_median = {}
-            for feature_name in feature_names:
-                if interactive_output:
-                    print(
-                        f"\r\033[K  date median | {date} | {feature_name}",
-                        end="", flush=True)
-                acquisitions = []
-                for acquisition in date_features:
-                    acquisitions.append(acquisition[feature_name])
-                stacked_acquisitions = np.stack(acquisitions, axis=0)
-                date_median[feature_name] = np.nanmedian(
-                    stacked_acquisitions, axis=0)
-            median_features_by_date.append(date_median)
-
-        monthly_median = {}
-        for feature_name in feature_names:
-            if interactive_output:
-                print(
-                    f"\r\033[K  monthly median | {feature_name}",
-                    end="", flush=True)
-            date_arrays = []
-            for date_features in median_features_by_date:
-                date_arrays.append(date_features[feature_name])
-            stacked_dates = np.stack(date_arrays, axis=0)
-            monthly_median[feature_name] = np.nanmedian(
-                stacked_dates, axis=0)
-
-        if interactive_output:
-            print("\r\033[K  medians complete", flush=True)
-        else:
-            print("  medians complete")
-
-    first_feature = feature_names[0]
-    valid_count = np.zeros_like(monthly_median[first_feature], dtype=np.int32)
-    for date_features in median_features_by_date:
-        date_is_valid = np.isfinite(date_features[first_feature])
-        valid_count += date_is_valid.astype(np.int32)
-
-    return monthly_median, valid_count
+        for name in c.SW_FEATURES:
+            print(f"  monthly median | {name}", flush=True)
+            with ExitStack() as maps:
+                arrays_by_date = []
+                for scenes in features_by_date.values():
+                    acquisitions = []
+                    for scene in scenes:
+                        array = scene[name]
+                        if isinstance(array, (str, os.PathLike)):
+                            array = np.load(array, mmap_mode="r",
+                                            allow_pickle=False)
+                            maps.callback(array._mmap.close)
+                        acquisitions.append(array)
+                    arrays_by_date.append(acquisitions)
+                shape = arrays_by_date[0][0].shape
+                if len(shape) != 2 or any(
+                        array.shape != shape for acquisitions in arrays_by_date
+                        for array in acquisitions):
+                    raise ValueError("scene feature arrays must share a 2D grid")
+                monthly[name] = np.empty(shape, np.float32)
+                if name == c.SW_FEATURES[0]:
+                    valid_count = np.zeros(shape, np.int32)
+                for row0 in range(0, shape[0], c.SW_CELL_PX):
+                    for col0 in range(0, shape[1], c.SW_CELL_PX):
+                        window = np.s_[row0:row0 + c.SW_CELL_PX,
+                                       col0:col0 + c.SW_CELL_PX]
+                        date_medians = []
+                        for acquisitions in arrays_by_date:
+                            if len(acquisitions) == 1:
+                                median = acquisitions[0][window]
+                            else:
+                                blocks = [array[window]
+                                          for array in acquisitions]
+                                median = np.nanmedian(
+                                    np.stack(blocks), axis=0)
+                            date_medians.append(median)
+                        monthly[name][window] = np.nanmedian(
+                            np.stack(date_medians), axis=0)
+                        if name == c.SW_FEATURES[0]:
+                            for median in date_medians:
+                                valid_count[window] += np.isfinite(median)
+    print("  medians complete", flush=True)
+    return monthly, valid_count
 
 
 # %% 5. Mask known non-water features

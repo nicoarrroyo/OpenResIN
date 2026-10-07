@@ -4,6 +4,8 @@ import argparse
 import glob
 import json
 import os
+import shutil
+import tempfile
 import warnings
 
 import numpy as np
@@ -172,65 +174,89 @@ def _find_known_feature_masks():
     return boundaries_path, urban_path
 
 
+def _save_feature_arrays(features, cache_dir):
+    """Save one scene's layers without retaining them in the scene index."""
+    paths = {}
+    for name, values in features.items():
+        path = os.path.join(cache_dir, f"{name}.npy")
+        np.save(path, values, allow_pickle=False)
+        paths[name] = path
+    return paths
+
+
+def _cache_scene_features(scene_dir, device, cache_dir, remaining_scenes):
+    """Build one scene, save it, then release its arrays on return."""
+    os.makedirs(cache_dir, exist_ok=True)
+    _print_step(2, "scene bands and cloud masking")
+    print(f"  {os.path.basename(scene_dir)}", flush=True)
+    scene = sw.read_scene_10m(scene_dir)
+    pixels = scene["blue"].size
+    # Reserve cached scene layers and the final compressed archive.
+    feature_bytes = pixels * np.dtype(np.float32).itemsize * len(c.SW_FEATURES)
+    needed = feature_bytes * (remaining_scenes + 1) + pixels * 4
+    available = shutil.disk_usage(cache_dir).free
+    if available < needed:
+        raise OSError(
+            f"feature building needs about {needed / 2**30:.1f} GiB free "
+            f"on the output filesystem; {available / 2**30:.1f} GiB available")
+
+    cloud_mask = sw.predict_cloud_mask(
+        scene["red"], scene["green"], scene["nir"],
+        inference_device=device)
+    masked_bands = sw.mask_scene_bands(scene, cloud_mask)
+    _print_step(3, "water indices")
+    indices = sw.scene_indices(masked_bands)
+    originals = {
+        "B02": masked_bands["blue"],
+        "B03": masked_bands["green"],
+        "B04": masked_bands["red"],
+        "B08": masked_bands["nir"],
+        **indices,
+    }
+    paths = _save_feature_arrays(originals, cache_dir)
+    del originals, masked_bands, indices
+
+    added_features, reflectance_record = sw.added_scene_features(
+        scene_dir, scene, cloud_mask)
+    paths.update(_save_feature_arrays(added_features, cache_dir))
+    return paths, scene["meta"], reflectance_record
+
+
 def _create_monthly_features(out_dir, scenes, device, month):
-    """Build and save thirteen classifier features on the 10 m grid."""
-    features_by_date = {}
-    reflectance_records = []
-    image_metadata = None
-
-    for scene_dir in scenes:
-        _print_step(2, "scene bands and cloud masking")
-
-        scene = sw.read_scene_10m(scene_dir)
-        cloud_mask = sw.predict_cloud_mask(
-            scene["red"],
-            scene["green"],
-            scene["nir"],
-            inference_device=device)
-        masked_bands = sw.mask_scene_bands(scene, cloud_mask)
-
-        _print_step(3, "water indices")
-        print(f"  indices for {os.path.basename(scene_dir)[:22]}")
-        indices = sw.scene_indices(masked_bands)
-        added_features, reflectance_record = sw.added_scene_features(
-            scene_dir, scene, cloud_mask)
-        reflectance_records.append(reflectance_record)
-
-        scene_features = {
-            "B02": masked_bands["blue"],
-            "B03": masked_bands["green"],
-            "B04": masked_bands["red"],
-            "B08": masked_bands["nir"],
-            **indices,
-            **added_features,
-        }
-        date = _scene_date(scene_dir)
-        features_by_date.setdefault(date, []).append(scene_features)
-        image_metadata = scene["meta"]
-        del scene
-
-    _print_step(4, "monthly median features")
-    features, valid_count = sw.monthly_features(features_by_date)
-    del features_by_date
-
-    _print_step(5, "sea and urban masking")
-    print("  rivers and known reservoirs stay: they are valid water")
-    boundaries_path, urban_path = _find_known_feature_masks()
-    sw.mask_known_features(
-        features, image_metadata, boundaries_path, urban_path)
-    # Added layers require the original features and MNDWI to be usable.
-    original_valid = np.ones(features["B02"].shape, dtype=bool)
-    for name in ("B02", "B03", "B04", "B08", "NDWI", "NDVI"):
-        original_valid &= np.isfinite(features[name])
-    features["MNDWI"][~original_valid] = np.nan
-    added_valid = np.isfinite(features["MNDWI"])
-    for name in ("B11", "B12", "B05", "B06", "B07", "B8A"):
-        features[name][~added_valid] = np.nan
-
+    """Build thirteen features using temporary files on the output disk."""
     os.makedirs(out_dir, exist_ok=True)
-    features_path = os.path.join(out_dir, "features.npz")
-    np.savez_compressed(
-        features_path, valid_count=valid_count, **features)
+    with tempfile.TemporaryDirectory(
+            prefix=".feature-build-", dir=out_dir) as work_dir:
+        features_by_date = {}
+        reflectance_records = []
+        for index, scene_dir in enumerate(scenes):
+            cache_dir = os.path.join(work_dir, f"scene-{index}")
+            paths, image_metadata, reflectance_record = _cache_scene_features(
+                scene_dir, device, cache_dir, len(scenes) - index)
+            date = _scene_date(scene_dir)
+            features_by_date.setdefault(date, []).append(paths)
+            reflectance_records.append(reflectance_record)
+
+        _print_step(4, "monthly median features")
+        features, valid_count = sw.monthly_features(features_by_date)
+        _print_step(5, "sea and urban masking")
+        print("  rivers and known reservoirs stay: they are valid water")
+        boundaries_path, urban_path = _find_known_feature_masks()
+        sw.mask_known_features(
+            features, image_metadata, boundaries_path, urban_path)
+        original_valid = np.ones(features["B02"].shape, dtype=bool)
+        for name in ("B02", "B03", "B04", "B08", "NDWI", "NDVI"):
+            original_valid &= np.isfinite(features[name])
+        features["MNDWI"][~original_valid] = np.nan
+        added_valid = np.isfinite(features["MNDWI"])
+        for name in ("B11", "B12", "B05", "B06", "B07", "B8A"):
+            features[name][~added_valid] = np.nan
+        archive_path = os.path.join(work_dir, "features.npz")
+        print("  compressing monthly features", flush=True)
+        np.savez_compressed(archive_path, valid_count=valid_count, **features)
+        valid_fraction = 100 * float((valid_count > 0).mean())
+        # Publish only after all feature processing and compression succeeds.
+        os.replace(archive_path, os.path.join(out_dir, "features.npz"))
 
     provenance = {
         "tile": _scene_tile(scenes[0]),
@@ -263,7 +289,6 @@ def _create_monthly_features(out_dir, scenes, device, month):
     with open(provenance_path, "w", encoding="utf-8") as handle:
         json.dump(provenance, handle, indent=2)
 
-    valid_fraction = 100 * float((valid_count > 0).mean())
     print(f"  monthly features valid on at least one date: "
           f"{valid_fraction:.2f}%")
     return image_metadata

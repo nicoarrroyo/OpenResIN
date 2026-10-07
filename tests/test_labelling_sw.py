@@ -230,6 +230,61 @@ def test_monthly_features_redirected_output_has_no_terminal_escapes(capsys):
     assert "\x1b" not in out
 
 
+def test_cached_medians_are_exact_and_bound_memory(tmp_path, monkeypatch):
+    """Cached blocks match independent whole-array medians, including NaNs."""
+    from openresin import label_sw
+    rng = np.random.default_rng(17)
+    dated, cached, expected = {}, {}, {}
+    for date, count in (("25", 1), ("27", 2), ("30", 1)):
+        dated[date], cached[date] = [], []
+        for index in range(count):
+            layers = {name: rng.normal(size=(17, 19)).astype(np.float32)
+                      for name in sw.c.SW_FEATURES}
+            for values in layers.values():
+                values[rng.random(values.shape) < 0.2] = np.nan
+                values[0, 0] = np.nan
+            folder = tmp_path / f"{date}-{index}"
+            folder.mkdir()
+            dated[date].append(layers)
+            cached[date].append(label_sw._save_feature_arrays(layers, folder))
+    with np.errstate(invalid="ignore"), pytest.warns(RuntimeWarning):
+        for name in sw.c.SW_FEATURES:
+            daily = [np.nanmedian(np.stack([scene[name] for scene in scenes]),
+                                  axis=0) for scenes in dated.values()]
+            expected[name] = np.nanmedian(np.stack(daily), axis=0)
+            if name == "B02":
+                expected_count = np.isfinite(daily).sum(axis=0)
+    monkeypatch.setattr(sw.c, "SW_CELL_PX", 5)
+    original_load, original_stack, maps = np.load, np.stack, []
+
+    def load(*args, **kwargs):
+        assert sum(not array._mmap.closed for array in maps) < 4
+        array = original_load(*args, **kwargs)
+        maps.append(array)
+        return array
+
+    def stack(arrays, *args, **kwargs):
+        assert all(max(array.shape) <= 5 for array in arrays)
+        return original_stack(arrays, *args, **kwargs)
+
+    monkeypatch.setattr(sw.np, "load", load)
+    monkeypatch.setattr(sw.np, "stack", stack)
+    actual, count = sw.monthly_features(cached)
+    assert all(array._mmap.closed for array in maps)
+    for name in sw.c.SW_FEATURES:
+        assert actual[name].dtype == np.float32
+        np.testing.assert_array_equal(actual[name], expected[name])
+    assert count.dtype == np.int32
+    np.testing.assert_array_equal(count, expected_count)
+
+
+def test_monthly_medians_reject_mismatched_shapes():
+    dated = {"25": [{"B02": np.ones((2, 2), np.float32)}],
+             "30": [{"B02": np.ones((3, 2), np.float32)}]}
+    with pytest.raises(ValueError, match="share a 2D grid"):
+        sw.monthly_features(dated)
+
+
 def test_scene_indices_inherit_nodata():
     """Masked (NaN) bands yield NaN indices, not numbers."""
     scene = {"green": np.array([[100.0, np.nan]]),
@@ -337,6 +392,7 @@ def test_resampling_rejects_misaligned_native_grid(tmp_path):
 def test_monthly_builder_saves_all_features_with_date_balanced_indices(
         tmp_path, monkeypatch):
     from openresin import label_sw
+    import weakref
 
     scenes = []
     scene_arrays = {}
@@ -352,7 +408,20 @@ def test_monthly_builder_saves_all_features_with_date_balanced_indices(
         scene["blue"][0, 0] = np.nan
         scene_arrays[str(scene_dir)] = scene
         scenes.append(str(scene_dir))
-    monkeypatch.setattr(sw, "read_scene_10m", scene_arrays.__getitem__)
+    references = []
+    save_arrays = label_sw._save_feature_arrays
+
+    def save(features, folder):
+        references.extend(weakref.ref(values) for values in features.values())
+        return save_arrays(features, folder)
+
+    def read(path):
+        assert all(reference() is None for reference in references)
+        return scene_arrays[path]
+
+    monkeypatch.setattr(label_sw, "_save_feature_arrays", save)
+    monkeypatch.setattr(sw, "read_scene_10m", read)
+    monkeypatch.setattr(sw.c, "SW_CELL_PX", 4)
     monkeypatch.setattr(sw, "predict_cloud_mask",
                         lambda *args, **kwargs: np.zeros((8, 8), np.uint8))
     monkeypatch.setattr(label_sw, "_find_known_feature_masks",
@@ -361,6 +430,8 @@ def test_monthly_builder_saves_all_features_with_date_balanced_indices(
 
     label_sw._create_monthly_features(str(out_dir), scenes, "cpu", "2026-04")
 
+    assert all(reference() is None for reference in references)
+    assert not list(out_dir.glob(".feature-build-*"))
     with np.load(out_dir / "features.npz") as archive:
         assert set(archive.files) == set(sw.c.SW_FEATURES) | {"valid_count"}
         # Daily MNDWI medians: (0.5 + 0)/2 and -1/3.
@@ -375,6 +446,34 @@ def test_monthly_builder_saves_all_features_with_date_balanced_indices(
     provenance = json.loads((out_dir / "features-provenance.json").read_text())
     assert provenance["feature_order"] == list(sw.c.SW_FEATURES)
     assert len(provenance["spectral_method"]["scene_metadata"]) == 3
+
+
+def test_failed_feature_build_preserves_archive_and_cleans_cache(
+        tmp_path, monkeypatch):
+    from openresin import label_sw
+    scene_dir = tmp_path / (
+        "S2A_MSIL2A_20260427T110651_N0512_R137_T31UCU_A.SAFE")
+    scene = _write_spectral_scene(scene_dir)
+    scene["meta"] = {"crs": "EPSG:32631"}
+    monkeypatch.setattr(sw, "read_scene_10m", lambda _path: scene)
+    monkeypatch.setattr(sw, "predict_cloud_mask",
+                        lambda *args, **kwargs: np.zeros((8, 8), np.uint8))
+    monkeypatch.setattr(label_sw, "_find_known_feature_masks",
+                        lambda: (None, None))
+
+    def fail(*_args, **_kwargs):
+        raise OSError("verification failure")
+
+    monkeypatch.setattr(label_sw.np, "savez_compressed", fail)
+    out_dir = tmp_path / "outputs"
+    out_dir.mkdir()
+    (out_dir / "features.npz").write_bytes(b"earlier archive")
+    with pytest.raises(OSError, match="verification"):
+        label_sw._create_monthly_features(
+            out_dir, [str(scene_dir)], "cpu", "2026-04")
+    assert (out_dir / "features.npz").read_bytes() == b"earlier archive"
+    assert not (out_dir / "features-provenance.json").exists()
+    assert not list(out_dir.glob(".feature-build-*"))
 
 
 def test_read_band_window_reads_requested_10m_pixels_as_float32(tmp_path):
