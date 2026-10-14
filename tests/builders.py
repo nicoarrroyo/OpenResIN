@@ -3,8 +3,10 @@
 Each returns plain dictionaries in the on-disk formats that label-sw writes
 and train-sw reads, so the tests in different files describe the same
 hand-off the same way.
-These are basically copies of the real code, made to produce fake data to
-test against in the suite.
+
+They write these formats independently of the production writers, with
+fixed test values, so the hand-off tests can detect a writer that drifts
+from the format.
 """
 import os
 
