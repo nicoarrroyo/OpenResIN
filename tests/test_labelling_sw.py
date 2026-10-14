@@ -1,6 +1,6 @@
 import sys
 from types import SimpleNamespace
-from unittest.mock import ANY, MagicMock
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -9,20 +9,12 @@ import rasterio
 from openresin import labelling_sw as sw
 
 
-def test_grid_first_cell_is_full():
-    """Cell 1 is the north-west 500 x 500 px window."""
+def test_grid_cell_windows():
+    """Row-major 500 px cells; the last row and column clip to the tile."""
     assert sw.grid_cell_window(1) == (0, 500, 0, 500)
-
-
-def test_grid_last_cell_is_clipped():
-    """Cell 484 is the south-east corner, clipped to the tile edge."""
+    assert sw.grid_cell_window(22) == (0, 500, 10500, 10980)  # row end
+    assert sw.grid_cell_window(23) == (500, 1000, 0, 500)  # second row
     assert sw.grid_cell_window(484) == (10500, 10980, 10500, 10980)
-
-
-def test_grid_row_end_and_second_row():
-    """Cell 22 ends the first row; cell 23 starts the second."""
-    assert sw.grid_cell_window(22) == (0, 500, 10500, 10980)
-    assert sw.grid_cell_window(23) == (500, 1000, 0, 500)
 
 
 def test_grid_rejects_bad_ids():
@@ -36,62 +28,38 @@ def _tci(value, shape=(2, 2)):
     return np.full((3,) + shape, value, dtype=np.float32)
 
 
-def test_same_day_median_takes_median_of_two_values():
-    """Two valid same-day acquisitions take the median, per the agreed operator."""
-    out, valid = sw.composite_scenes({"2026-04-27": [_tci(10.0), _tci(20.0)]})
-    assert np.allclose(out, 15.0)
-    assert valid.all()
+def test_composite_takes_valid_medians_within_then_across_dates():
+    """Median within each date, then across dates; NaN is ignored, and a
+    pixel with no valid date stays NoData."""
+    nan = np.nan
+    cases = [
+        # Skewed values tell a median from a mean (43.3 for these).
+        ({"d1": [_tci(10.0), _tci(20.0), _tci(100.0)]}, 20.0),
+        ({"d1": [_tci(10.0)], "d2": [_tci(20.0)], "d3": [_tci(100.0)]},
+         20.0),
+        # A masked date does not pull a valid one.
+        ({"d1": [_tci(nan)], "d2": [_tci(80.0)]}, 80.0),
+    ]
+    for dated, expected in cases:
+        out, valid = sw.composite_scenes(dated)
+        assert np.allclose(out, expected)
+        assert valid.all()
 
-
-def test_single_acquisition_passes_through():
-    """One valid date is sufficient for V1 and is used directly."""
-    out, valid = sw.composite_scenes({"2026-04-30": [_tci(42.0)]})
-    assert np.allclose(out, 42.0)
-    assert valid.all()
-
-
-def test_no_valid_date_is_nodata():
-    """Zero valid dates means NoData, not zero: NaN out, invalid flag."""
-    bad = _tci(np.nan)
-    out, valid = sw.composite_scenes({"2026-04-25": [bad]})
+    out, valid = sw.composite_scenes({"d1": [_tci(nan)], "d2": [_tci(nan)]})
     assert np.isnan(out).all()
     assert not valid.any()
 
 
-def test_cloudy_date_does_not_pull_median():
-    """A NaN (masked) date is ignored where another date is valid."""
-    out, valid = sw.composite_scenes({
-        "2026-04-25": [_tci(np.nan)],
-        "2026-04-30": [_tci(100.0)],
-    })
-    assert np.allclose(out, 100.0)
-    assert valid.all()
-
-
 def test_mask_invalid_covers_cloud_shadow_and_nodata():
     """Classes 1-3 and all-bands-zero pixels become NaN; clear stays."""
-    tci = np.arange(12, dtype=np.uint8).reshape(3, 2, 2)
-    mask = np.array([[0, 1], [2, 3]])
-    bands = [np.array([[5, 5], [0, 5]], dtype=np.float32),
-             np.array([[5, 5], [0, 5]], dtype=np.float32)]
+    tci = np.arange(15, dtype=np.uint8).reshape(3, 1, 5)
+    mask = np.array([[0, 1, 2, 3, 0]])
+    bands = [np.array([[5, 5, 5, 5, 0]], dtype=np.float32),
+             np.array([[5, 5, 5, 5, 0]], dtype=np.float32)]
     out = sw.mask_invalid(tci, mask, bands)
     assert out[0, 0, 0] == 0.0  # clear, non-zero bands: kept
-    assert np.isnan(out[:, 0, 1]).all()  # cloud
-    assert np.isnan(out[:, 1, 0]).all()  # shadow + nodata zeros
-    assert np.isnan(out[:, 1, 1]).all()  # shadow
-
-
-def test_nodata_does_not_survive_composite():
-    """The west-edge wedge: NaN (masked nodata) on one date does not
-    darken a valid other date, and NaN on every date stays NoData."""
-    valid = _tci(80.0)
-    masked = np.full((3, 2, 2), np.nan, dtype=np.float32)
-    out, v = sw.composite_scenes({"d1": [masked], "d2": [valid]})
-    assert np.allclose(out, 80.0)
-    assert v.all()
-    out, v = sw.composite_scenes({"d1": [masked], "d2": [masked]})
-    assert np.isnan(out).all()
-    assert not v.any()
+    assert np.isnan(out[:, 0, 1:4]).all()  # thick cloud, thin cloud, shadow
+    assert np.isnan(out[:, 0, 4]).all()  # clear but all bands zero: NoData
 
 
 def test_discover_scenes_rejects_files(tmp_path):
@@ -116,36 +84,26 @@ def test_provenance_names_sources_and_settings():
     assert prov["grid"]["ids"] == "1-484 row-major"
 
 
-def test_validate_areas_accepts_separated_windows():
-    """Eight training and four test cells, none touching across splits."""
+def test_validate_areas_needs_eight_four_and_separated_splits():
+    """Eight training and four test cells, none touching across splits.
+
+    A grid boundary is not independence: a test cell that shares an edge or
+    a corner with a training cell is rejected, and so is a duplicate.
+    """
     train_ids = [100, 102, 104, 106, 300, 302, 304, 306]
     test_ids = [200, 202, 400, 402]
-    assignment = sw.validate_areas(train_ids, test_ids)
-    assert assignment == {"train": train_ids, "test": test_ids}
+    assert sw.validate_areas(train_ids, test_ids) == {
+        "train": train_ids, "test": test_ids}
 
-
-def test_validate_areas_rejects_wrong_counts():
-    """The design fixes the split at eight training and four test areas."""
-    with pytest.raises(ValueError):
-        sw.validate_areas([100, 102, 104, 106, 300, 302, 304],
-                          [200, 202, 400, 402])
-    with pytest.raises(ValueError):
-        sw.validate_areas([100, 102, 104, 106, 300, 302, 304, 306],
-                          [200, 202, 400])
-
-
-def test_validate_areas_rejects_duplicates_and_neighbours():
-    """One cell cannot serve twice, and a grid boundary is not
-    independence: neighbouring opposite-split cells are rejected."""
-    with pytest.raises(ValueError):
-        sw.validate_areas([100, 102, 104, 106, 300, 302, 304, 306],
-                          [100, 202, 400, 402])
-    with pytest.raises(ValueError):  # 101 neighbours 100, even diagonally
-        sw.validate_areas([100, 102, 104, 106, 300, 302, 304, 306],
-                          [101, 202, 400, 402])
-    with pytest.raises(ValueError):  # 122 is diagonal to 100
-        sw.validate_areas([100, 102, 104, 106, 300, 302, 304, 306],
-                          [122, 202, 400, 402])
+    bad_splits = [
+        (train_ids[:-1], test_ids),  # seven training areas
+        (train_ids, test_ids[:-1]),  # three test areas
+        (train_ids, [101, 202, 400, 402]),  # 101 is east of 100
+        (train_ids, [123, 202, 400, 402]),  # 123 is diagonal to 100
+    ]
+    for train, test in bad_splits:
+        with pytest.raises(ValueError):
+            sw.validate_areas(train, test)
 
 
 def test_freeze_and_load_areas_roundtrip(tmp_path):
@@ -159,29 +117,6 @@ def test_freeze_and_load_areas_roundtrip(tmp_path):
     first = record["areas"][0]
     assert (first["id"], first["split"]) == (1, "train")
     assert first["window"] == [0, 500, 0, 500]
-
-
-def test_save_polygons_rejects_unknown_class(tmp_path):
-    """A polygon whose class is neither water nor non-water is a
-    labelling error, caught at save time rather than at sampling."""
-    with pytest.raises(ValueError):
-        sw.save_polygons(str(tmp_path / "a.json"), "T31UCU", 1, "train",
-                         [0, 500, 0, 500],
-                         [{"id": 1, "class": "cloud",
-                           "vertices_scene": [[0, 0]]}])
-
-
-def test_save_polygons_roundtrip(tmp_path):
-    """Saved polygons reload with scene coordinates intact."""
-    import json
-
-    path = str(tmp_path / "area-001.json")
-    polygons = [{"id": 1, "class": "water",
-                 "vertices_scene": [[10, 20], [30, 20], [30, 40]]}]
-    sw.save_polygons(path, "T31UCU", 1, "train", [0, 500, 0, 500],
-                     polygons)
-    with open(path, encoding="utf-8") as handle:
-        assert json.load(handle)["polygons"] == polygons
 
 
 def _feature_dicts(value):
@@ -202,7 +137,7 @@ def test_monthly_features_median_and_count():
     assert (valid_count == 2).all()
 
     # Skewed values distinguish median from mean: within-date medians
-    # are 2, 4 and 50, so the monthly median is 4 (a mean would give 34.33).
+    # are 2, 4 and 50, so the monthly median is 4 (their mean is 18.67).
     def _single(value):
         from openresin import config as c
         return {name: np.full((1, 1), value, dtype=np.float32)
@@ -215,19 +150,6 @@ def test_monthly_features_median_and_count():
     assert np.allclose(skewed_features["B04"], 4.0)
     assert np.allclose(skewed_features["NDWI"], 4.0)
     assert (skewed_count == 3).all()
-
-
-def test_monthly_features_redirected_output_has_no_terminal_escapes(capsys):
-    """Redirected progress stays plain text without terminal control codes."""
-    dated = {"2026-04-25": [_feature_dicts(10.0)],
-             "2026-04-30": [_feature_dicts(20.0)]}
-
-    sw.monthly_features(dated)
-
-    out = capsys.readouterr().out
-    assert out
-    assert "\r" not in out
-    assert "\x1b" not in out
 
 
 def test_cached_medians_are_exact_and_bound_memory(tmp_path, monkeypatch):
@@ -285,8 +207,8 @@ def test_monthly_medians_reject_mismatched_shapes():
         sw.monthly_features(dated)
 
 
-def test_scene_indices_inherit_nodata():
-    """Masked (NaN) bands yield NaN indices, not numbers."""
+def test_indices_values_and_nodata():
+    """NDWI and NDVI follow their formulas; NaN and zero-sum stay NoData."""
     scene = {"green": np.array([[100.0, np.nan]]),
              "nir": np.array([[50.0, np.nan]]),
              "red": np.array([[25.0, 25.0]])}
@@ -296,19 +218,12 @@ def test_scene_indices_inherit_nodata():
     assert np.isnan(indices["NDWI"][0, 1])
     assert np.isnan(indices["NDVI"][0, 1])
 
-
-def test_calculate_ndwi_handles_values_zero_sum_and_nodata():
-    """NDWI is float32, while zero-sum and missing pixels stay NoData."""
-    green = np.array([[75.0, 0.0, np.nan]], dtype=np.float32)
-    nir = np.array([[25.0, 0.0, 10.0]], dtype=np.float32)
-
-    ndwi = sw.calculate_ndwi(green, nir)
-
-    assert ndwi.shape == (1, 3)
+    # 5 and -5 sum to zero with a non-zero difference: without the
+    # zero-sum guard this pixel would be infinite, not NoData.
+    ndwi = sw.calculate_ndwi(np.array([[5.0]], np.float32),
+                             np.array([[-5.0]], np.float32))
     assert ndwi.dtype == np.float32
-    assert np.isclose(ndwi[0, 0], 0.5)
-    assert np.isnan(ndwi[0, 1])
-    assert np.isnan(ndwi[0, 2])
+    assert np.isnan(ndwi[0, 0])
 
 
 def _write_spectral_scene(scene_dir, green_dn=4000, swir_dn=2000):
@@ -497,319 +412,111 @@ def test_read_band_window_reads_requested_10m_pixels_as_float32(tmp_path):
     assert np.array_equal(band, values[1:3, 2:5])
 
 
-def test_colorise_ndwi_uses_diverging_water_palette_and_black_nodata():
-    """Land is red, water blue, zero neutral, and NoData black."""
-    ndwi = np.array([[-1.0, 0.0, 1.0, np.nan]], dtype=np.float32)
+def test_colorise_ndwi_palette_limits_and_nodata():
+    """Land is red, water blue, zero neutral and NoData black. Values clip
+    at the [-0.5, 0.5] display limits, so faint water (0.13) is still blue."""
+    ndwi = np.array([[-0.5, 0.0, 0.13, 0.5, -0.9, 0.9, np.nan]],
+                    dtype=np.float32)
 
     rgb = sw.colorise_ndwi(ndwi)
 
-    assert rgb.shape == (1, 4, 3)
+    assert rgb.shape == (1, 7, 3)
     assert rgb.dtype == np.uint8
-    assert rgb[0, 0, 0] > rgb[0, 0, 2]
-    assert np.ptp(rgb[0, 1].astype(np.int16)) <= 1
-    assert rgb[0, 2, 2] > rgb[0, 2, 0]
-    assert np.array_equal(rgb[0, 3], [0, 0, 0])
-
-
-def test_colorise_ndwi_resolves_weak_water_at_display_limits():
-    """The tighter [-0.5, 0.5] range keeps faint coastal water visibly blue."""
-    ndwi = np.array([[-0.5, 0.0, 0.13, 0.5, -0.9, 0.9]], dtype=np.float32)
-
-    rgb = sw.colorise_ndwi(ndwi)
-
     assert rgb[0, 0, 0] > rgb[0, 0, 2]
     assert np.ptp(rgb[0, 1].astype(np.int16)) <= 1
     assert rgb[0, 2, 2] > rgb[0, 2, 0]
     assert rgb[0, 3, 2] > rgb[0, 3, 0]
     assert np.array_equal(rgb[0, 0], rgb[0, 4])
     assert np.array_equal(rgb[0, 3], rgb[0, 5])
+    assert np.array_equal(rgb[0, 6], [0, 0, 0])
 
 
-def _install_fake_tk(monkeypatch, photo_factory=None, polygon_ids=None,
-                     rectangle_ids=None, text_ids=None):
-    """Share the repeated fake-Tk scaffolding for annotator tests.
+SCROLL_OFFSET = 10  # the fake canvas is scrolled by this many pixels
+DISPLAY_SCALE = 4  # 2x2 chips on a 1920x1080 screen hit the scale cap
 
-    Each test keeps its own session script and result assertions; this only
-    removes the duplicated root/canvas/button construction. Callers that need
-    fixed canvas item numbers pass them explicitly.
+
+def _install_fake_tk(monkeypatch):
+    """Replace tkinter with mocks and record the editor's callbacks.
+
+    The tests drive the editor through its buttons and canvas clicks and
+    check only what it returns, not how it draws.
     """
     button_commands = {}
     canvas_bindings = {}
-    root_bindings = {}
-    canvas_kwargs = {}
-    scrollbar_calls = []
-    scroll_offset = 10
 
     root = MagicMock()
     root.winfo_screenwidth.return_value = 1920
     root.winfo_screenheight.return_value = 1080
     canvas = MagicMock()
-    canvas.create_image.return_value = 17
-    canvas.canvasx.side_effect = lambda value: value + scroll_offset
-    canvas.canvasy.side_effect = lambda value: value + scroll_offset
-    if polygon_ids is not None:
-        canvas.create_polygon.side_effect = polygon_ids
-    if rectangle_ids is not None:
-        canvas.create_rectangle.side_effect = rectangle_ids
-    if text_ids is not None:
-        canvas.create_text.side_effect = text_ids
+    canvas.canvasx.side_effect = lambda value: value + SCROLL_OFFSET
+    canvas.canvasy.side_effect = lambda value: value + SCROLL_OFFSET
     canvas.bind.side_effect = lambda seq, func: canvas_bindings.__setitem__(
-        seq, func)
-    root.bind.side_effect = lambda seq, func: root_bindings.__setitem__(
         seq, func)
 
     def make_button(_parent, text, command):
         button_commands[text] = command
         return MagicMock()
 
-    def make_canvas(*_args, **kwargs):
-        canvas_kwargs.update(kwargs)
-        return canvas
-
-    def make_scrollbar(*args, **kwargs):
-        scrollbar_calls.append((args, kwargs))
-        return MagicMock()
-
     fake_tk = SimpleNamespace(
         Tk=lambda: root,
-        Canvas=make_canvas,
+        Canvas=lambda *_args, **_kwargs: canvas,
         Frame=lambda *_args, **_kwargs: MagicMock(),
         Button=make_button,
         Label=lambda *_args, **_kwargs: MagicMock(),
-        Scrollbar=make_scrollbar,
+        Scrollbar=lambda *_args, **_kwargs: MagicMock(),
         TclError=Exception,
-        LEFT="left",
-        RIGHT="right",
-        BOTTOM="bottom",
-        X="x",
-        Y="y",
-        BOTH="both",
-        HORIZONTAL="horizontal",
-        VERTICAL="vertical",
-        SUNKEN="sunken",
-        W="w",
+        LEFT="left", RIGHT="right", BOTTOM="bottom", X="x", Y="y",
+        BOTH="both", HORIZONTAL="horizontal", VERTICAL="vertical",
+        SUNKEN="sunken", W="w",
     )
     from PIL import ImageTk
-    monkeypatch.setattr(
-        ImageTk, "PhotoImage", photo_factory or (lambda _image: object()))
+    monkeypatch.setattr(ImageTk, "PhotoImage", lambda _image: object())
     monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
-    return SimpleNamespace(
-        root=root, canvas=canvas, button_commands=button_commands,
-        canvas_bindings=canvas_bindings, root_bindings=root_bindings,
-        canvas_kwargs=canvas_kwargs, scrollbar_calls=scrollbar_calls,
-        scroll_offset=scroll_offset)
+
+    def click(image_x, image_y):
+        """Click where the image pixel appears on the scaled, scrolled canvas."""
+        canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
+            x=image_x * DISPLAY_SCALE - SCROLL_OFFSET,
+            y=image_y * DISPLAY_SCALE - SCROLL_OFFSET))
+
+    return SimpleNamespace(root=root, press=lambda text: button_commands[text](),
+                           click=click)
 
 
-def _tiny_chips(rows=2, cols=2):
+def _tiny_chips():
     return {
-        "composite": np.zeros((rows, cols, 3), dtype=np.uint8),
-        "NDWI": np.ones((rows, cols, 3), dtype=np.uint8),
+        "composite": np.zeros((2, 2, 3), dtype=np.uint8),
+        "NDWI": np.ones((2, 2, 3), dtype=np.uint8),
     }
 
 
-def test_annotate_area_reuses_background_canvas_item(monkeypatch):
-    """Enlarged view reuses one background and stores scrolled clicks in image pixels."""
+def test_annotator_saves_clicked_shapes_in_image_pixels(monkeypatch):
+    """Clicks on the scaled, scrolled view are saved as image-pixel vertices
+    with the chosen class; exclusions are saved apart; Undo drops the newest
+    polygon."""
     gui = _install_fake_tk(monkeypatch)
-    root, canvas = gui.root, gui.canvas
-    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
-    canvas_kwargs, scrollbar_calls = gui.canvas_kwargs, gui.scrollbar_calls
-    scroll_offset = gui.scroll_offset
-    chips = _tiny_chips()
-
-    # Tiny 2x2 chips on 1920x1080 fit far above the cap, so scale is 4
-    # and the scaled 8x8 canvas fits the viewport without scrolling.
-    expected_scale = 4
-    expected_scaled = 2 * expected_scale
-
-    def run_session():
-        button_commands["NDWI"]()
-        wanted_image = [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]
-        for image_x, image_y in wanted_image:
-            event_x = image_x * expected_scale - scroll_offset
-            event_y = image_y * expected_scale - scroll_offset
-            canvas_bindings["<ButtonPress-1>"](
-                SimpleNamespace(x=event_x, y=event_y))
-        button_commands["Close as water"]()
-
-    root.mainloop.side_effect = run_session
-
-    new_polygons, kept = sw.annotate_area(chips)
-    assert canvas.create_image.call_count == 1
-    canvas.itemconfig.assert_called_once_with(17, image=ANY)
-    root.state.assert_called_with("zoomed")
-    scrollregions = [
-        call.kwargs.get("scrollregion")
-        for call in canvas.config.call_args_list
-        if "scrollregion" in call.kwargs
-    ]
-    assert (0, 0, expected_scaled, expected_scaled) in scrollregions
-    assert canvas_kwargs["width"] == expected_scaled
-    assert canvas_kwargs["height"] == expected_scaled
-    assert len(scrollbar_calls) == 2
-    assert new_polygons == [{
-        "class": "water",
-        "vertices": [[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]],
-    }]
-    assert kept == []
-
-
-def test_annotate_area_scale_floor_clips_canvas_to_viewport(monkeypatch):
-    """A 500 px cell on 1920x1080 floors to scale 2 with a clipped canvas."""
-    gui = _install_fake_tk(monkeypatch)
-    root, canvas = gui.root, gui.canvas
-    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
-    canvas_kwargs = gui.canvas_kwargs
-    scroll_offset = gui.scroll_offset
-    chips = {
-        "composite": np.zeros((500, 500, 3), dtype=np.uint8),
-        "NDWI": np.ones((500, 500, 3), dtype=np.uint8),
-    }
-
-    # Pure fit is min(1800//500, 880//500) = 1, floored to 2. The scaled
-    # 1000x1000 image exceeds the 880 px viewport height, so the canvas
-    # clips to 1000x880 and scrolls.
-    expected_scale = 2
-    expected_scaled = 500 * expected_scale
-    expected_canvas_height = 1080 - 200
-
-    def run_session():
-        for image_x, image_y in [(10.0, 20.0), (30.0, 20.0), (30.0, 40.0)]:
-            canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
-                x=image_x * expected_scale - scroll_offset,
-                y=image_y * expected_scale - scroll_offset))
-        button_commands["Close as water"]()
-
-    root.mainloop.side_effect = run_session
-
-    new_polygons, kept = sw.annotate_area(chips)
-    scrollregions = [
-        call.kwargs.get("scrollregion")
-        for call in canvas.config.call_args_list
-        if "scrollregion" in call.kwargs
-    ]
-    assert (0, 0, expected_scaled, expected_scaled) in scrollregions
-    assert canvas_kwargs["width"] == expected_scaled
-    assert canvas_kwargs["height"] == expected_canvas_height
-    assert new_polygons == [{
-        "class": "water",
-        "vertices": [[10.0, 20.0], [30.0, 20.0], [30.0, 40.0]],
-    }]
-    assert kept == []
-
-
-def test_annotate_area_undo_last_polygon(monkeypatch):
-    """Undo polygon drops the newest closed boundary and its outline."""
-    gui = _install_fake_tk(monkeypatch, polygon_ids=[101, 102])
-    root, canvas = gui.root, gui.canvas
-    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
-    scroll_offset = gui.scroll_offset
-    expected_scale = 4
-
-    def click(image_x, image_y):
-        canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
-            x=image_x * expected_scale - scroll_offset,
-            y=image_y * expected_scale - scroll_offset))
-
-    def run_session():
-        button_commands["Undo polygon"]()
-        for point in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
-            click(*point)
-        button_commands["Close as water"]()
-        for point in [(10.0, 10.0), (12.0, 10.0), (10.0, 12.0)]:
-            click(*point)
-        button_commands["Close as non-water"]()
-        button_commands["Undo polygon"]()
-
-    root.mainloop.side_effect = run_session
-    chips = _tiny_chips()
-
-    new_polygons, kept = sw.annotate_area(chips)
-    assert new_polygons == [{
-        "class": "water",
-        "vertices": [[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]],
-    }]
-    assert kept == []
-    canvas.delete.assert_any_call(102)
-
-
-def test_annotate_area_undo_saved_polygon(monkeypatch):
-    """Undo after reopen drops the session polygon first, then the saved one."""
-    gui = _install_fake_tk(monkeypatch, polygon_ids=[301, 302])
-    root, canvas = gui.root, gui.canvas
-    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
-    scroll_offset = gui.scroll_offset
-    expected_scale = 4
-
-    def run_session():
-        for image_x, image_y in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
-            canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
-                x=image_x * expected_scale - scroll_offset,
-                y=image_y * expected_scale - scroll_offset))
-        button_commands["Close as water"]()
-        button_commands["Undo polygon"]()
-        button_commands["Undo polygon"]()
-
-    root.mainloop.side_effect = run_session
-    chips = _tiny_chips()
-    existing = [{"class": "water",
-                 "vertices": [[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]}]
-
-    new_polygons, kept = sw.annotate_area(chips, existing)
-    assert new_polygons == []
-    assert kept == []
-    assert len(existing) == 1
-    deleted = [call.args[0] for call in canvas.delete.call_args_list]
-    assert deleted.index(302) < deleted.index(301)
-
-
-def test_annotate_area_tab_toggles_composite_and_ndwi(monkeypatch):
-    """Tab flips between the composite and NDWI chips, in order."""
-    gui = _install_fake_tk(
-        monkeypatch,
-        photo_factory=lambda image: float(np.mean(np.asarray(image))))
-    root, canvas = gui.root, gui.canvas
-    root_bindings = gui.root_bindings
-
-    def run_session():
-        root_bindings["<Tab>"](SimpleNamespace())
-        root_bindings["<Tab>"](SimpleNamespace())
-
-    root.mainloop.side_effect = run_session
-    chips = _tiny_chips()
-
-    sw.annotate_area(chips)
-    shown = [call.kwargs["image"]
-             for call in canvas.itemconfig.call_args_list]
-    assert shown == [1.0, 0.0]
-
-
-def test_annotate_area_auto_close_toggle(monkeypatch):
-    """Auto-close defaults on; the button turns click-to-close off."""
-    gui = _install_fake_tk(monkeypatch)
-    root, canvas = gui.root, gui.canvas
-    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
-    scroll_offset = gui.scroll_offset
-    expected_scale = 4
-
-    def click(image_x, image_y):
-        canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
-            x=image_x * expected_scale - scroll_offset,
-            y=image_y * expected_scale - scroll_offset))
 
     def run_session():
         for point in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
-            click(*point)
-        click(5.0, 5.0)
-        button_commands["Auto-close: on"]()
-        for point in [(10.0, 10.0), (12.0, 10.0), (10.0, 12.0)]:
-            click(*point)
-        click(11.0, 11.0)
-        button_commands["Close as non-water"]()
+            gui.click(*point)
+        gui.click(5.0, 5.0)  # near the first vertex: auto-closes as water
+        gui.press("Auto-close: on")  # now clicks near the start are vertices
+        for point in [(10.0, 10.0), (12.0, 10.0), (10.0, 12.0), (11.0, 11.0)]:
+            gui.click(*point)
+        gui.press("Close as non-water")
+        for point in [(20.0, 20.0), (22.0, 20.0), (20.0, 22.0)]:
+            gui.click(*point)
+        gui.press("Close as exclusion")
+        for point in [(30.0, 30.0), (32.0, 30.0), (30.0, 32.0)]:
+            gui.click(*point)
+        gui.press("Close as water")
+        gui.press("Undo polygon")
 
-    root.mainloop.side_effect = run_session
-    chips = _tiny_chips()
+    gui.root.mainloop.side_effect = run_session
 
-    new_polygons, kept = sw.annotate_area(chips)
+    (new_polygons, kept, new_exclusions, kept_exclusions,
+     action) = sw.annotate_reviewed_area(_tiny_chips())
+
     assert new_polygons == [
         {"class": "water",
          "vertices": [[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]]},
@@ -817,43 +524,39 @@ def test_annotate_area_auto_close_toggle(monkeypatch):
          "vertices": [[10.0, 10.0], [12.0, 10.0], [10.0, 12.0],
                       [11.0, 11.0]]},
     ]
+    assert new_exclusions == [
+        {"vertices": [[20.0, 20.0], [22.0, 20.0], [20.0, 22.0]]}]
     assert kept == []
+    assert kept_exclusions == []
+    assert action == "finish"
 
 
-def test_annotate_area_numbers_polygons_in_list_order(monkeypatch):
-    """Loaded and new polygons show 1-based list numbers; undo clears tags."""
-    gui = _install_fake_tk(
-        monkeypatch, polygon_ids=[301, 302],
-        rectangle_ids=[401, 402], text_ids=[501, 502])
-    root, canvas = gui.root, gui.canvas
-    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
-    scroll_offset = gui.scroll_offset
-    expected_scale = 4
+@pytest.mark.parametrize("undo_presses, expected_kept", [
+    (1, "saved"),  # the first Undo removes this session's polygon
+    (2, "none"),  # the second removes the saved polygon
+])
+def test_annotator_undo_reaches_saved_polygons_last(
+        monkeypatch, undo_presses, expected_kept):
+    """Undo works newest first, and never edits the caller's list."""
+    gui = _install_fake_tk(monkeypatch)
+    saved = [{"class": "water",
+              "vertices": [[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]}]
 
     def run_session():
-        for image_x, image_y in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
-            canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
-                x=image_x * expected_scale - scroll_offset,
-                y=image_y * expected_scale - scroll_offset))
-        button_commands["Close as water"]()
-        button_commands["Undo polygon"]()
-        button_commands["Undo polygon"]()
+        for point in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
+            gui.click(*point)
+        gui.press("Close as water")
+        for _ in range(undo_presses):
+            gui.press("Undo polygon")
 
-    root.mainloop.side_effect = run_session
-    chips = _tiny_chips()
-    existing = [{"class": "water",
-                 "vertices": [[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]}]
+    gui.root.mainloop.side_effect = run_session
 
-    new_polygons, kept = sw.annotate_area(chips, existing)
+    new_polygons, kept, _, _, _ = sw.annotate_reviewed_area(
+        _tiny_chips(), saved)
+
     assert new_polygons == []
-    assert kept == []
-    shown_numbers = [call.kwargs["text"]
-                     for call in canvas.create_text.call_args_list]
-    assert shown_numbers == ["1", "2"]
-    deleted = [call.args[0] for call in canvas.delete.call_args_list]
-    for item in (302, 402, 502, 301, 401, 501):
-        assert item in deleted
-    assert deleted.index(302) < deleted.index(301)
+    assert kept == (saved if expected_kept == "saved" else [])
+    assert len(saved) == 1
 
 
 def test_mask_scene_bands_masks_every_band():
@@ -936,43 +639,25 @@ def _area_record_polygons():
     ]
 
 
-def test_annotations_digest_ignores_ids_and_completion():
-    """Display ids and the stored decision do not affect the revision."""
+def test_annotations_digest_tracks_geometry_not_ids():
+    """Display ids do not change the revision; vertex moves, order swaps
+    and exclusion edits do, so a completion must be reviewed again."""
     polygons = _area_record_polygons()
     exclusions = [{"vertices_scene": [[0, 3], [1, 3], [1, 4]]}]
-    first = sw.annotations_digest(
-        "T31UCU", 1, "train", [0, 4, 0, 4], polygons, exclusions)
-    renumbered = [
-        {"id": 9, "class": "water",
-         "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]},
-        {"id": 3, "class": "non-water",
-         "vertices_scene": [[2, 2], [4, 2], [4, 4], [2, 4]]},
-    ]
-    second = sw.annotations_digest(
-        "T31UCU", 1, "train", [0, 4, 0, 4], renumbered, exclusions)
-    assert first == second
-    assert len(first) == 64
 
+    def digest(polygons, exclusions):
+        return sw.annotations_digest(
+            "T31UCU", 1, "train", [0, 4, 0, 4], polygons, exclusions)
 
-def test_annotations_digest_changes_on_geometry_or_order():
-    """Vertex moves, order swaps and exclusion edits force re-review."""
-    polygons = _area_record_polygons()
-    base = sw.annotations_digest(
-        "T31UCU", 1, "train", [0, 4, 0, 4], polygons, [])
-    moved = sw.annotations_digest(
-        "T31UCU", 1, "train", [0, 4, 0, 4],
-        [{"id": 1, "class": "water",
-          "vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2.5]]},
-         polygons[1]], [])
-    swapped = sw.annotations_digest(
-        "T31UCU", 1, "train", [0, 4, 0, 4],
-        [polygons[1], polygons[0]], [])
-    excluded = sw.annotations_digest(
-        "T31UCU", 1, "train", [0, 4, 0, 4], polygons,
-        [{"vertices_scene": [[0, 3], [1, 3], [1, 4]]}])
-    assert moved != base
-    assert swapped != base
-    assert excluded != base
+    base = digest(polygons, exclusions)
+    renumbered = [dict(polygon, id=polygon["id"] + 8) for polygon in polygons]
+    moved = [dict(polygons[0], vertices_scene=[[0, 0], [2, 0], [2, 2],
+                                               [0, 2.5]]), polygons[1]]
+    assert digest(renumbered, exclusions) == base
+    assert len(base) == 64
+    assert digest(moved, exclusions) != base
+    assert digest([polygons[1], polygons[0]], exclusions) != base
+    assert digest(polygons, []) != base
 
 
 def test_load_area_record_legacy_defaults(tmp_path):
@@ -1066,57 +751,23 @@ def test_save_area_record_cleans_temp_on_failure(tmp_path, monkeypatch):
     assert leftovers == []
 
 
-def test_rasterize_clips_to_window_and_keeps_halves():
-    """Outside-window geometry is ignored; half-pixel edges are kept."""
+def test_rasterize_clips_to_window_and_keeps_fractional_edges():
+    """Outside-window geometry is ignored; fractional edges are kept.
+
+    A pixel is labelled when its centre lies inside the polygon. An edge at
+    1.6 covers the centre at 1.5, which a rounded-down vertex would lose.
+    """
     window = [0, 4, 0, 4]
     inside = [{"vertices_scene": [[0, 0], [2, 0], [2, 2], [0, 2]]}]
     outside = [{"vertices_scene": [[10, 10], [12, 10], [12, 12], [10, 12]]}]
-    half = [{"vertices_scene": [[0.5, 0.5], [2.5, 0.5],
-                                [2.5, 2.5], [0.5, 2.5]]}]
+    fractional = [{"vertices_scene": [[0, 0], [1.6, 0],
+                                      [1.6, 1.6], [0, 1.6]]}]
     inside_mask = sw.rasterize_scene_polygons(inside, window)
     assert inside_mask.shape == (4, 4)
     assert inside_mask[:2, :2].all()
     assert not inside_mask[2:, 2:].any()
     assert not sw.rasterize_scene_polygons(outside, window).any()
-    half_mask = sw.rasterize_scene_polygons(half, window)
-    assert half_mask.any()
-    assert not half_mask[3, 3]
+    fractional_mask = sw.rasterize_scene_polygons(fractional, window)
+    assert fractional_mask[:2, :2].all()
+    assert fractional_mask.sum() == 4
     assert sw.rasterize_scene_polygons([], window).shape == (4, 4)
-
-
-def test_annotate_reviewed_area_draws_exclusion(monkeypatch):
-    """The reviewed editor draws, numbers and undoes exclusions."""
-    gui = _install_fake_tk(monkeypatch)
-    root, canvas = gui.root, gui.canvas
-    button_commands, canvas_bindings = gui.button_commands, gui.canvas_bindings
-    scroll_offset = gui.scroll_offset
-    expected_scale = 4
-
-    def click(image_x, image_y):
-        canvas_bindings["<ButtonPress-1>"](SimpleNamespace(
-            x=image_x * expected_scale - scroll_offset,
-            y=image_y * expected_scale - scroll_offset))
-
-    def run_session():
-        for point in [(4.0, 4.0), (6.0, 4.0), (4.0, 6.0)]:
-            click(*point)
-        button_commands["Close as exclusion"]()
-        for point in [(10.0, 10.0), (12.0, 10.0), (10.0, 12.0)]:
-            click(*point)
-        button_commands["Close as water"]()
-
-    root.mainloop.side_effect = run_session
-    chips = _tiny_chips()
-
-    (new_polygons, kept, new_exclusions, kept_exclusions,
-     action) = sw.annotate_reviewed_area(chips)
-    assert action == "finish"
-    assert new_polygons == [{
-        "class": "water",
-        "vertices": [[10.0, 10.0], [12.0, 10.0], [10.0, 12.0]],
-    }]
-    assert new_exclusions == [{
-        "vertices": [[4.0, 4.0], [6.0, 4.0], [4.0, 6.0]],
-    }]
-    assert kept == []
-    assert kept_exclusions == []

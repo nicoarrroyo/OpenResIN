@@ -733,22 +733,6 @@ def save_area_record(path, record):
     return record
 
 
-def save_polygons(path, tile, area_id, split, window, polygons):
-    """Save water/non-water polygons in 10 m scene coordinates.
-
-    Legacy writer kept for existing callers and tests. It writes only the
-    five fixed keys with an atomic replace, so it drops any exclusions or
-    completion decision. New annotation code must use save_area_record().
-    """
-    for polygon in polygons:
-        if polygon["class"] not in ("water", "non-water"):
-            raise ValueError("polygon class must be 'water' or "
-                             f"'non-water', got {polygon['class']!r}")
-    record = {"tile": tile, "area_id": area_id, "split": split,
-              "window": list(window), "polygons": polygons}
-    return save_area_record(path, record)
-
-
 def rasterize_scene_polygons(entries, window):
     """Rasterize scene-coordinate polygons clipped to one area window.
 
@@ -820,8 +804,8 @@ def annotate_reviewed_area(chips, existing=None, existing_exclusions=None,
                            preview_provider=None):
     """Draw polygons and exclusions with an explicit completion decision.
 
-    Polygons use area-pixel vertices with a water/non-water class, as in
-    annotate_area(). Exclusions use area-pixel vertices with no class and
+    Polygons use area-pixel vertices with a water/non-water class.
+    Exclusions use area-pixel vertices with no class and
     are shown with E-numbers in magenta. Preview shows the proposed
     four-state footprint from preview_provider(); Complete confirms it and
     closes with action "complete"; Reopen closes with action "reopen";
@@ -1365,17 +1349,3 @@ def annotate_reviewed_area(chips, existing=None, existing_exclusions=None,
     root.mainloop()
     return (new_polygons, kept_existing, new_exclusions, kept_exclusions,
             chosen_action["name"])
-
-
-def annotate_area(chips, existing=None):
-    """Draw polygons while switching between the composite and dated chips.
-
-    Saved polygons are shown with their 1-based list number in a small
-    class-coloured tag above the top edge, and can be removed with Undo,
-    newest first.
-    Return (new_polygons, kept_existing): polygons drawn this session and
-    the loaded polygons left after any undo. Finish saves kept + new.
-    """
-    reviewed = annotate_reviewed_area(chips, existing, None, "", False,
-                                      "", False, None)
-    return reviewed[0], reviewed[1]
