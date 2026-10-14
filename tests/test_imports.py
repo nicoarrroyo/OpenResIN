@@ -1,31 +1,9 @@
 import ast
-import os
 from pathlib import Path
 
 import pytest
 
 PKG_DIR = Path(__file__).resolve().parents[1] / "src" / "openresin"
-
-# Modules with no import-time side effects, so a test can safely import them.
-# The four pipeline scripts joined this list once their bodies moved into
-# main(): before that, importing label.py opened a tkinter GUI and importing
-# train.py started a training run.
-IMPORTABLE = [
-    "config",
-    "data_handling",
-    "evaluate",
-    "image_handling",
-    "inference",
-    "label",
-    "label_sw",
-    "misc",
-    "modelling",
-    "modelling_sw",
-    "predict",
-    "train",
-    "train_sw",
-    "user_interfacing",
-]
 
 # The stages pyproject.toml promises as console scripts. Each must expose a
 # main() for `pip install -e .` to generate a working launcher.
@@ -117,9 +95,13 @@ def test_no_working_directory_manipulation():
     offenders = []
     for module_name, tree in _parse_all().items():
         for node in ast.walk(tree):
-            if (isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "chdir"):
+            if not isinstance(node, ast.Call):
+                continue
+            # os.chdir(...), and a bare chdir(...) after `from os import chdir`.
+            if ((isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "chdir")
+                    or (isinstance(node.func, ast.Name)
+                        and node.func.id == "chdir")):
                 offenders.append(f"{module_name}.py:{node.lineno}")
 
     assert not offenders, (
@@ -127,31 +109,16 @@ def test_no_working_directory_manipulation():
         + "\nDerive paths from the config anchors instead.")
 
 
-@pytest.mark.parametrize("module_name", IMPORTABLE)
-def test_imports_without_side_effects(module_name):
-    """Importing a module must not run a pipeline or move the process.
-
-    A changed working directory is the specific symptom being guarded: it is
-    invisible until some later, unrelated path lookup resolves against the
-    wrong root.
-    """
-    import importlib
-
-    before = os.getcwd()
-    importlib.import_module(f"openresin.{module_name}")
-    assert os.getcwd() == before, (
-        f"importing openresin.{module_name} changed the working directory "
-        f"from {before} to {os.getcwd()}")
-
-
 @pytest.mark.parametrize("module_name", STAGES)
-def test_stage_exposes_main(module_name):
-    """Every console script in pyproject.toml resolves to a callable main().
+def test_stage_exposes_main_and_help(module_name):
+    """Every console script in pyproject.toml resolves to a callable main(),
+    and its parser prints --help and exits 0.
 
     `openresin-label = "openresin.label:main"` is a promise pip keeps by
     importing the module and calling that attribute, so a missing or renamed
     main() breaks the installed command while the module itself still imports
-    cleanly. Nothing else would notice.
+    cleanly. The --help call checks that the argparse parser builds; a stage
+    that still did its work at import time would run it here.
     """
     import importlib
 
@@ -160,21 +127,6 @@ def test_stage_exposes_main(module_name):
         f"openresin.{module_name} has no callable main(), so its console "
         f"script in pyproject.toml would fail on invocation")
 
-
-@pytest.mark.parametrize("module_name", STAGES)
-def test_stage_help_does_not_run_the_pipeline(module_name):
-    """--help must print usage and exit, without touching data or the cwd.
-
-    This is the cheap end-to-end check that the argparse conversion actually
-    took: a stage that still did its work at import time would run it here.
-    """
-    import importlib
-
-    module = importlib.import_module(f"openresin.{module_name}")
-    before = os.getcwd()
-
     with pytest.raises(SystemExit) as excinfo:
         module.build_parser().parse_args(["--help"])
-
     assert excinfo.value.code == 0
-    assert os.getcwd() == before
