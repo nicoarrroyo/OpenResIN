@@ -7,6 +7,3 @@
 *.py    text eol=lf
 *.md    text eol=lf
 *.toml  text eol=lf
-
-# the hand-labelled seed data shouldn't be edited anyway, so that's exempt
-data/seed-labels/*.csv  -text

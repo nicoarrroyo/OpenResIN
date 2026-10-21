@@ -32,10 +32,6 @@ gpu = [ # Required CUPy version depends on your CUDA install.
 ]
 
 [project.scripts]
-openresin-label		= "openresin.label:main"
-openresin-train		= "openresin.train:main"
-openresin-predict	= "openresin.predict:main"
-openresin-evaluate	= "openresin.evaluate:main"
 openresin-label-sw	= "openresin.label_sw:main"
 openresin-train-sw	= "openresin.train_sw:main"
 
