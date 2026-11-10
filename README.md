@@ -51,14 +51,6 @@ python -c "import torch; print(torch.version.cuda, torch.cuda.is_available())"
 
 That should output `13.0 True`.
 
-**5. Install `cupy` for GPU compositing.** Optional but strongly recommended; only useful with a CUDA-capable GPU. It accelerates the percentile calculation in the compositing step, which is slow and unreliable on the CPU.
-
-```bash
-pip install -e ".[gpu]"
-```
-
-This will install `cupy-cuda12x`. If your CUDA is a different generation, install the matching `cupy` package yourself: see the [CuPy installation guide](https://docs.cupy.dev/en/stable/install.html).
-
 **A note on the shipped configuration.** `src/openresin/config.py` ships at full scale, sized for the development machine. Do not edit it to run on something smaller: every stage takes command-line flags for that, and they are listed below.
 
 ## Usage

@@ -9,7 +9,6 @@ dependencies = [
 	"numpy",
 	"matplotlib",
 	"Pillow",
-	"tensorflow>=2.16", # for updated keras saving behaviour
 	"omnicloudmask",
 	"geopandas",
 	"fiona",
@@ -24,11 +23,6 @@ readme = "README.md"
 license = "Apache-2.0"
 authors = [
 	{name = "Nicolas Renato Arroyo", email = "nicolas.renato.arroyo@gmail.com"}
-]
-
-[project.optional-dependencies]
-gpu = [ # Required CUPy version depends on your CUDA install.
-	"cupy-cuda12x"
 ]
 
 [project.scripts]
