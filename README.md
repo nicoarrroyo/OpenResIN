@@ -1,243 +1,110 @@
 # Open-source Reservoir Identifier and Navigator (OpenResIN)
 
-OpenResIN is a project for identifying small water reservoirs in Sentinel-2 satellite imagery. Its existing patch-based pipeline has four stages: label a scene by hand, train a classification model on the labelled image patches, run that model across a whole tile, and score the result. The surface-water classifier path has separate commands for feature building and polygon annotation (`openresin-label-sw`) and for the pixel baseline (`openresin-train-sw prepare`, `fit`, `evaluate`). It does not use the existing patch trainer.
+OpenResIN finds surface water in Sentinel-2 satellite imagery. A random forest classifies each 10 m pixel as water or non-water from monthly features. The pipeline has two commands:
 
-Each stage of the existing four-stage pipeline is a console script, and each stage hands the next one ordinary PNG or CSV files on disk. The surface-water commands instead pass numerical NPZ datasets, a pickled forest and GeoTIFFs with readable JSON manifests.
+- `openresin-label-sw` builds the monthly features and lets you draw water and non-water polygons by hand.
+- `openresin-train-sw` prepares the datasets (`prepare`), fits the forest (`fit`) and scores it on the test areas (`evaluate`).
 
 > [!important]
-> The pipeline is not fully final; Labelling and training are relatively stable/sound. Inference and evaluation do run but are largely provisional and known to have significant methodological limitations.
+> This is the first version (V1). It is fixed to one tile (T31UCU) and one month (April 2026). A scene-based second version is in development and will change the commands.
 
 ## Installation
 
-Python 3.11 or newer. Developed and tested on 3.13.
-
-**1. Clone the repository.**
+You need Python 3.11 or newer. The project is developed on Python 3.13.
 
 ```bash
 git clone https://github.com/nicoarrroyo/OpenResIN.git
 cd OpenResIN
-```
-
-**2. Create a virtual environment.** Strongly recommended and is the only tested method.
-
-```bash
 python -m venv .venv
-```
-
-Activate it with `.\.venv\Scripts\Activate.ps1` on Windows PowerShell, or `source .venv/bin/activate` on Linux and macOS.
-
-**3. Install the package.** This installs the dependencies, including scikit-learn, and puts the four existing pipeline stages plus the two experimental surface-water commands on your PATH as console scripts.
-
-```bash
+source .venv/bin/activate        # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -e .
 ```
 
-`tkinter` may need to be installed manually on Linux through your package manager.
+On Linux you may need to install `tkinter` with your package manager.
 
-**4. Install a CUDA build of PyTorch.** Do not skip this if you have a CUDA-compatible GPU (NVIDIA). `torch` arrives as a dependency of `omnicloudmask`, and the wheel pip takes from PyPI is CPU-only: cloud masking will start, fail to find CUDA, and offer to fall back to the CPU. Fix it with this:
+**If you have an NVIDIA GPU, install a CUDA build of PyTorch.** pip installs a CPU-only build, and cloud masking on a CPU takes about one hour per scene. Pick the index for your driver at [pytorch.org](https://pytorch.org/get-started/locally/); `cu130` is the build used in development. The uninstall is necessary, because otherwise pip reports "requirement already satisfied" and changes nothing.
 
 ```bash
 pip uninstall -y torch torchvision
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-```
-
-The uninstall is needed because if `torch` is already installed, pip reports "requirement already satisfied". `torchvision` comes along because the two are built as a pair and have to match.
-
-Pick the index matching your driver from the selector at [pytorch.org](https://pytorch.org/get-started/locally/). Run `nvidia-smi` to see which CUDA version your driver reports. `cu130` is the build this project was developed against. Verify with:
-
-```bash
 python -c "import torch; print(torch.version.cuda, torch.cuda.is_available())"
 ```
 
-That should output `13.0 True`.
+The last command should print `13.0 True`.
 
-**A note on the shipped configuration.** `src/openresin/config.py` ships at full scale, sized for the development machine. Do not edit it to run on something smaller: every stage takes command-line flags for that, and they are listed below.
+## Input data
+
+The repository ships only the code. You supply:
+
+- **Sentinel-2 L2A scenes**, extracted as `.SAFE` folders into `data/sat-images/`.
+- **The sea and urban masks**, in `data/masks/boundaries/` and `data/masks/urban-areas/`. See [`data/README.md`](data/README.md).
+- **The area labels**: `areas.json` and the twelve `area-XXX.json` files. Seed labels are being created currently; email me for a copy of the current version (find email below).
 
 ## Usage
 
-The four existing pipeline commands run in order. Each one reads what the previous one wrote:
+Run these commands from the repository root (pass `--help` for options); outputs go to `outputs/label-water/` by default.
 
-```
-data/sat-images/*.SAFE
-        |
-        |  openresin-label
-        v
-outputs/patches/<class>/*.png
-        |
-        |  openresin-train
-        v
-models/*.keras
-        |
-        |  openresin-predict  (also writes outputs/chunks/)
-        v
-outputs/predictions/*.csv
-        |
-        |  openresin-evaluate
-        v
-metrics
-```
-
-Every command takes `-h` and `--help` to list its flags and their defaults.
-
-### Surface-water labelling (`openresin-label-sw`)
-
-This command builds features and polygon labels for the current monthly pixel-level water/non-water classifier. With Sentinel-2 L2A `.SAFE` scenes in `data/sat-images/` and the masks described in [`data/README.md`](data/README.md), for example:
+**1. Build the features.**
 
 ```bash
-openresin-label-sw --month 2026-04 --out-dir outputs/label-water-current
-openresin-label-sw --month 2026-04 --out-dir outputs/label-water-current --annotate 25
+openresin-label-sw --month 2026-04
 ```
 
-The first command builds a numbered navigation preview and thirteen monthly feature arrays under the selected output directory. Inspect the preview and choose a suitable cell number before using `--annotate`; the second command opens that cell for water and non-water polygon labels and saves them as `area-025.json` in the same output directory. `--train-areas` and `--test-areas` now accept eight training and four test areas, expanded from the original four-training/two-test plan; an existing `areas.json` is not changed automatically. Run `openresin-label-sw --help` for the exact flags. The annotation NDWI chip prefers the saved masked monthly NDWI (`NDWI (masked)`) when its provenance matches the month, scenes and masks, and otherwise falls back to a raw B03/B08 window calculation (`NDWI (raw)`) with a console warning; the TCI composite and dated chips stay raw window reads in both cases. NDWI colours use a `[-0.5, 0.5]` diverging display only, centred on zero with non-finite values shown black. This command does **not** train a random forest, and `openresin-train` still trains the older patch model.
+This masks clouds, the sea and urban areas, takes the monthly median of thirteen features per pixel, and writes `features.npz` and a numbered grid preview of the tile. Allow about 30 GiB of free disk space. If the command is interrupted and leaves a `.feature-build-*` folder behind, delete it before rerunning.
 
-Feature building processes one scene at a time and saves temporary arrays in a `.feature-build-*` directory under `--out-dir`. Monthly medians use 500 × 500 pixel blocks; the completed monthly arrays then stay in RAM for masking and saving. For four full-size scenes, allow about 30 GiB of free disk space in addition to existing files; the command checks space before processing each scene. Choose an output directory on disk, not a RAM-backed filesystem such as `/tmp` on some Linux installations. Temporary arrays are removed on success or a Python exception. A forced kill or power loss can leave a `.feature-build-*` directory; after confirming no build is running, remove only that abandoned temporary directory before retrying. The feature values, date-first aggregation and final `features.npz` format are preserved.
-
-### Surface-water classifier (`openresin-train-sw prepare` / `fit` / `evaluate`)
-
-The current classifier is fixed to tile T31UCU, month 2026-04, feature order B02/B03/B04/B08/NDWI/NDVI/MNDWI/B11/B12/B05/B06/B07/B8A, eight training areas (002/025/200/250/275/300/325/375) and four test areas (225/350/400/450). All three actions require the saved thirteen-feature archive, the frozen split, all twelve active completion decisions, and the four recorded `.SAFE` scenes. Numerical settings stay fixed: 100 water pixels per polygon, then 1,000 water pixels per area with five non-water samples per selected water pixel in each area, seed 202604, 100 trees, `class_weight=None`, and water at probability >= 0.75. Do not use `openresin-train` for these datasets: that command remains the older Keras patch trainer.
-
-The first six features retain their existing DN and index calculations. MNDWI uses BOA reflectance from B03 and B11; B11/B12/B05/B06/B07/B8A use the product metadata offsets and quantification. Native 20 m bands are bilinearly aligned to the B03 10 m grid after masking zero DN and any footprint containing a cloudy 10 m child. Added features follow the same date-first monthly median and sea/urban masks. Negative finite reflectance is retained. `valid_count` counts dates with finite B02 before sea/urban masking; classifier eligibility requires all thirteen final features to be finite.
-
-This method was selected after inspecting held-out results. Its reported scores are test-exposed exploratory results, not independent validation. Existing six-feature inputs and old fitted runs do not match the current contract. Build features in a new output directory, copy the existing `areas.json` and `area-XXX.json` files there if reusing their geometry, and review and mark all twelve areas complete against the new archive. Keep earlier inputs and runs for reference; do not change their completion digests by hand. Use that new directory as `--input-dir` below.
+**2. Add the labels and confirm each area.** Copy `areas.json` and the `area-XXX.json` files into `outputs/label-water/`. A completed area is tied to one exact `features.npz`, so you must confirm each of the twelve areas again against yours. For example, for area 025:
 
 ```bash
-openresin-train-sw prepare \
-  --input-dir outputs/label-water-current \
-  --run-dir outputs/label-water-current/runs/2026-04 \
-  --source-image-root data/sat-images
-openresin-train-sw fit \
-  --input-dir outputs/label-water-current \
-  --run-dir outputs/label-water-current/runs/2026-04 \
-  --source-image-root data/sat-images
-openresin-train-sw evaluate \
-  --input-dir outputs/label-water-current \
-  --run-dir outputs/label-water-current/runs/2026-04 \
-  --source-image-root data/sat-images
+openresin-label-sw --month 2026-04 --annotate 25
 ```
 
-`prepare` validates the recorded scene identities and grids, completion digests, exact 8/4 split, feature order and final thirteen-feature validity. It writes `v1-train.npz`, `v1-test.npz`, `v1-sampling.json`, and `prepare-complete.json`. Training uses the deterministic two-cap water sampler and three successive non-water draws (one, two and two times the selected water count), without replacement; test data contain every eligible labelled pixel at natural prevalence. The NPZ files retain area, scene row/column, and polygon position for every sample. `prepare` never fits, scores, or shows held-out predictions.
+Check the polygons, click **Complete area**, then **Confirm completion**. To label a new area, choose a cell number from the grid preview and open it in the same way.
 
-`fit` rechecks the frozen inputs, validates the training dataset and per-area 1:5 water-to-non-water ratio, fits `RandomForestClassifier(n_estimators=100, random_state=202604, class_weight=None)`, and writes `v1-model.pkl` plus `fit-complete.json`. It never loads the test dataset; a missing test file does not stop the fit.
+**3. Prepare, fit and evaluate.** Use a new run folder for each attempt: no step overwrites a finished output.
 
-`evaluate` loads the saved model and frozen test dataset, reports per-area and pooled water precision/recall/F1 with `[[TN, FP], [FN, TP]]` tables, and writes `v1-metrics.json`, four `area-XXX-water-probability.tif` / `area-XXX-water-binary.tif` pairs, one `area-XXX-overlay.png` per test area, and `evaluate-complete.json`. The overlays show masked NDWI pixels in black. Probability is float32 in [0, 1] with NoData -9999.0; binary is uint8 with 0/1 and NoData 255. Outputs are uncalibrated RF water probability from 1:5 water-to-non-water training; the split prevents pixel overlap but does not establish independence, and the derived background can hide missed water.
-
-Choose a new run directory per attempt; `prepare` refuses a populated destination and no phase overwrites a successful output. `v1-sampling.json` stays frozen through later phases. If `prepare` fails, it leaves no run directory. If `fit` fails, check the run directory before retrying: a failure during publication can leave `v1-model.pkl` without `fit-complete.json`, which blocks the same command. During `evaluate`, completed scores are published before raster and overlay export. If export fails, `v1-metrics.json` stays in the run, the failure is appended to `evaluate-failures.jsonl`, and `evaluate-complete.json` is absent. Fix the export problem and re-run `evaluate` with the same fitted run; it preserves identical metrics and finishes missing exports without refitting. This mechanical retry is not a new independent evaluation. Equivalent `python -m openresin.train_sw ...` invocations work.
-
-### 1. Set up the data directory
-
-The repository ships with the code and sample seed labels. The user supplies the imagery and the masking files themselves. Sentinel-2 L2A scenes in `.SAFE` format are extracted into `data/sat-images/`, and the masking files go under `data/masks/` in their labelled subdirectories. See [`data/README.md`](data/README.md) for much more detail.
-
-### 2. Label the imagery (`openresin-label`)
-
-Do some image labelling on 3 images without any cloud masking, for example.
 ```bash
-openresin-label --n-images 3 --no-cloud-masking
+openresin-train-sw prepare  --run-dir outputs/label-water/runs/2026-04
+openresin-train-sw fit      --run-dir outputs/label-water/runs/2026-04
+openresin-train-sw evaluate --run-dir outputs/label-water/runs/2026-04
 ```
 
-`openresin-label` reads every `.SAFE` scene under `data/sat-images/`, masks the clouds out of each one, and composites them into a single clean image to label against. A Tkinter window then opens for you to draw bounding boxes around reservoirs, water bodies, land and sea.
+- `prepare` checks the four scenes, the frozen 8/4 split and the completed areas, then samples the training and test pixels.
+- `fit` fits a 100-tree random forest on the training pixels. It never reads the test set.
+- `evaluate` calls a pixel water at a probability of 0.75 or more. It prints precision, recall and F1 per test area and for all four together, and writes probability and binary GeoTIFFs and an overlay image for each test area.
 
-If you make a mistake or would like to return to a previous chunk, type `back` (use `back n` to go back `n` chunks). Once you've finished your labelling sessions, type `break` to take a break. The script will then segment the labelled regions and write them as PNGs into `outputs/patches/<class>/`. Those patches are the training set.
+If `fit` fails, start again in a new run folder. If `evaluate` fails while it writes the GeoTIFFs, run it again on the same run folder; the scores do not change.
 
-Label coordinates from your own session go to `outputs/labels/`, never to the tracked seed set in `data/seed-labels/`.
-
-### 3. Train the model (`openresin-train`)
-
-Train a model for 50 epochs, without accuracy and loss curves plotted post-training, for example.
-```bash
-openresin-train --epochs 50 --no-show-plots
-```
-
-`openresin-train` loads the patch tree, splits it into training and validation sets, builds the Keras model, and fits it. The model is written to `models/` as `{model type} model epochs-{epochs}.keras`. This filename is used to identify the model for inference.
-
-There is also `epoch_pathfinder.py`, which is an experimental script, not part of the pipeline (yet). No need to run it for now.
-
-### 4. Run predictions (`openresin-predict`): provisional
-
-Conduct inference with a 50-epoch-trained model over 2000 chunks, for example.
-```bash
-openresin-predict --model-epochs 50 --n-chunk-preds 2000
-```
-
-`openresin-predict` prepares the scene, cuts it into mini-chunk PNGs under `outputs/chunks/`, classifies them in batches, and writes one row per prediction to a CSV in `outputs/predictions/`.
-
-The `--model-epochs` must match the epoch count you trained with. It defaults to the config value of 150, so a model trained with `--epochs 50` will not be found unless you say so. `--model-type` works the same way.
-
-
-> [!important]
-> **Pending redesign.** See *Project Status* below.
-> 
-> The output format, the input representation and the decision rule are all stopgaps.
-
-### 5. Assess accuracy (`openresin-evaluate`): provisional
-
-Find performance metrics for a 50-epoch-trained model, for example.
-```bash
-openresin-evaluate --model-epochs 50
-```
-
-`openresin-evaluate` reads the prediction CSV, compares it against the labelled chunks in `data/seed-labels/`, and prints a confusion matrix with the derived metrics. Its `--model-epochs` has to match the predictions file you want scored, exactly as it does for `openresin-predict`.
-
-> [!important] 
-> **Pending redesign.** See *Project Status* below.
->
-> This stage is the most provisional in the pipeline. It is kept because it is the tool that produced the figures in the original dissertation. Do not cite its output.
-
-## Repository Structure
+## Repository structure
 
 ```
 OpenResIN/
-├── data/                 # Inputs supplied by the user (except seed labels).
-│   ├── masks/            # Masking layers, organised by category
-│   ├── sat-images/       # Sentinel-2 .SAFE scenes you download and extract
-│   └── seed-labels/      # Hand-labelled seed data, git-tracked, read-only
-├── models/               # Trained models. Not tracked by git, arrives empty
-├── outputs/              # Everything the pipeline generates. Not tracked by git
-│   ├── chunks/           # Mini-chunk PNGs cut for prediction, one folder per scene
-│   ├── label-water/      # Surface-water features, annotations and prepared runs
-│   ├── labels/           # Label coordinates from your own labelling sessions
-│   ├── patches/          # Segmented training images, one folder per class
-│   └── predictions/      # Model predictions across a whole tile
+├── data/                 # Inputs you supply. Git tracks only the READMEs
+│   ├── masks/            # Sea and urban masks (three other folders are unused for now)
+│   └── sat-images/       # Sentinel-2 .SAFE scenes you download and extract
+├── outputs/              # Everything the commands write. Git tracks only the README
+│   └── label-water/      # Features, area labels and one folder per run
 ├── src/openresin/        # The source package
-└── tests/                # Test suite, run with `python -m pytest tests`
+└── tests/                # Test suite
 ```
-
-Each of `data/` and `outputs/` has its own README with the detail: see [`data/README.md`](data/README.md) and [`outputs/README.md`](outputs/README.md).
-
-### The source package
 
 ```
 src/openresin/
-├── label.py              # openresin-label. Orchestrates the labelling stage
-├── labelling.py          # The labelling steps that label.py orchestrates
-├── train.py              # openresin-train. Orchestrates training
-├── modelling.py          # Dataset loading, model building, training, and saving
-├── train_sw.py           # Surface-water prepare/fit/evaluate command
-├── modelling_sw.py       # Surface-water validation, sampling, forest, metrics
-├── predict.py            # openresin-predict. Runs predictions over a whole tile
-├── inference.py          # The core prediction logic that predict.py drives
-├── evaluate.py           # openresin-evaluate. Confusion matrix and metrics
-├── config.py             # Settings and path anchors for every stage
-├── data_handling.py      # Loading, preprocessing and managing data
-├── image_handling.py     # Image manipulation and processing
-├── user_interfacing.py   # Prompts, warnings and progress reporting
-├── misc.py               # Miscellaneous utilities
-└── epoch_pathfinder.py   # Experimental epoch sweep. Not part of the pipeline
+├── label_sw.py           # openresin-label-sw. Feature build and annotation command
+├── labelling_sw.py       # Scene reading, cloud masking, features, annotation window
+├── train_sw.py           # openresin-train-sw. prepare, fit and evaluate command
+├── modelling_sw.py       # Checks, sampling, random forest, scores and GeoTIFF export
+├── image_handling.py     # Band reading and the sea and urban masks
+└── config.py             # Fixed settings and path anchors
 ```
 
-The test suite checks configuration and import contracts, the surface-water feature and annotation workflow, completion and label-state semantics, deterministic preparation of the random-forest datasets, and the forest fit, thresholded metrics, GeoTIFF placement and synthetic end-to-end run.
+## Limitations
 
-## Project Status and Current Limitations
-
-Labelling and training are the stable parts of the pipeline: `openresin-label` and `openresin-train` run end to end and produce outputs as intended. The actual model for `openresin-train` may not stay as a Keras Sequential classifier, but the scaffolding of the stages themselves is intentional.
-
-`openresin-label-sw` and `openresin-train-sw` provide the current surface-water classifier, separate from that older four-stage path. Monthly features and polygon labels now connect to deterministic pixel datasets, one fitted 100-tree forest, held-out test scores, and four exported water-probability/binary GeoTIFF pairs with prediction overlays. This baseline run does not satisfy the separate fresh-operating-system `label` plus `train` acceptance requirement.
-
-Prediction and evaluation are provisional: `openresin-predict` and `openresin-evaluate` both run and both produce output, but the methodology behind them is not settled and is expected to be replaced. The code is left in place so the pipeline can be executed end to end, and so that a reader can see what is currently being done before deciding what should be done instead.
-
-Specific known limitations:
-- Compositing on the CPU is slow and unreliable: The percentile calculation falls back to `numpy` when `cupy` is absent. On a full tile this has crashed on the machines it was tried on. A CUDA-capable GPU is the supported path.
-- Cloud masking on the CPU is extremely time-consuming: For this reason, using a CUDA-capable GPU is the strongly suggested path. If you want to use a CPU, be prepared to wait approximately 1 hour per image.
-- `LP_MODE` does not support data segmentation: The low-power path through labelling skips segmentation entirely, so it cannot produce training patches. This is unlikely to change.
+- **Fixed scope.** V1 only runs on tile T31UCU for April 2026.
+- **Test-exposed scores.** The V1 settings were chosen after looking at results on the test areas, so its scores (water F1 84.12%) are exploratory, not independent validation.
+- **Spatial correlation.** Nearby pixels may still be spatially correlated, even though training and test areas do not touch or share pixels.
+- **Uncalibrated probability.** The probability GeoTIFF is the forest's vote share after 1:5 water-to-non-water training, not a calibrated probability of water.
+- **Missing masks.** If a mask folder is empty, `openresin-label-sw` prints a warning and continues without that mask, which changes the features.
+- **Reproducibility across machines.** Running feature extraction on a different GPU, PyTorch, or OmniCloudMask version may change the cloud masks, and therefore the features and scores.
 
 ## License
 
