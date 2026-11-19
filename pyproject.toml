@@ -9,7 +9,6 @@ dependencies = [
 	"numpy",
 	"matplotlib",
 	"Pillow",
-	"tensorflow>=2.16", # for updated keras saving behaviour
 	"omnicloudmask",
 	"geopandas",
 	"fiona",
@@ -26,16 +25,7 @@ authors = [
 	{name = "Nicolas Renato Arroyo", email = "nicolas.renato.arroyo@gmail.com"}
 ]
 
-[project.optional-dependencies]
-gpu = [ # Required CUPy version depends on your CUDA install.
-	"cupy-cuda12x"
-]
-
 [project.scripts]
-openresin-label		= "openresin.label:main"
-openresin-train		= "openresin.train:main"
-openresin-predict	= "openresin.predict:main"
-openresin-evaluate	= "openresin.evaluate:main"
 openresin-label-sw	= "openresin.label_sw:main"
 openresin-train-sw	= "openresin.train_sw:main"
 

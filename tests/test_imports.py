@@ -7,7 +7,7 @@ PKG_DIR = Path(__file__).resolve().parents[1] / "src" / "openresin"
 
 # The stages pyproject.toml promises as console scripts. Each must expose a
 # main() for `pip install -e .` to generate a working launcher.
-STAGES = ["label", "train", "predict", "evaluate", "label_sw", "train_sw"]
+STAGES = ["label_sw", "train_sw"]
 
 
 def _parse_all():
@@ -51,11 +51,10 @@ def _bound_at_module_level(tree):
 def test_relative_imports_resolve():
     """Every `from .module import name` names something that exists.
 
-    This is the check that would have caught save_image_file and
-    get_sentinel_bands: both were deleted from their defining module while
-    inference.py went on importing them, leaving the module unimportable and
-    the whole predict path dead. Python only reports the first failure per
-    module, so this collects all of them at once.
+    It catches a function that is deleted or renamed in its defining module
+    while another module still imports it, which leaves the importing module
+    unimportable and its whole stage dead. Python only reports the first
+    failure per module, so this collects all of them at once.
     """
     modules = _parse_all()
     bound = {name: _bound_at_module_level(tree) for name, tree in modules.items()}
@@ -114,7 +113,7 @@ def test_stage_exposes_main_and_help(module_name):
     """Every console script in pyproject.toml resolves to a callable main(),
     and its parser prints --help and exits 0.
 
-    `openresin-label = "openresin.label:main"` is a promise pip keeps by
+    `openresin-label-sw = "openresin.label_sw:main"` is a promise pip keeps by
     importing the module and calling that attribute, so a missing or renamed
     main() breaks the installed command while the module itself still imports
     cleanly. The --help call checks that the argparse parser builds; a stage

@@ -10,7 +10,6 @@ data/
 │   ├── rivers/              # River masks
 │   ├── terrain/             # Terrain masks (not implemented yet)
 │   └── urban-areas/         # Urban area masks
-├── seed-labels/             # Hand-labelled seed data, shipped with the repository
 └── sat-images/              # Sentinel-2 imagery you download and extract yourself
 ```
 
@@ -21,14 +20,6 @@ This folder contains several sub-folders. Each sub-folder will expect a type of 
 - **Format**: Varies by mask. Shapefiles (`.shp`, with their `.shx`, `.dbf` and `.prj` siblings), GeoJSON (`.geojson`), and GeoTIFF (`.tif`) are all used;
 - **Naming**: Fixed. Each mask is looked up by its exact path and filename, which are listed in the `masks` README;
 - **Example**: `known-reservoirs/LRR_EW_202307_v1/SHP/LRR_ENG_20230601_WGS84.shp`.
-
-## `seed-labels`
-This contains label data that has already been labelled by hand, and it is the one folder in `data/` whose contents are tracked by git rather than supplied by you. It serves as a public starting point: a fresh clone can produce training images straight away, without sitting through a labelling session first.
-
-`openresin-label` reads these files but never writes to them. Labels you create yourself are written to `outputs/labels/` instead, so your work never appears as a modification to a tracked file.
-- **Format**: Comma-separated values (`.csv`), one row per chunk;
-- **Naming**: `{tile}-{chunks}chunks.csv`;
-- **Example**: `T31UCU-5000chunks.csv`.
 
 ## `sat-images`
 This folder expects Sentinel 2 satellite image folders, which can be downloaded from the Copernicus Browser as .zip folders. Simply unzip the folder here and the program should find everything automatically. Please take care to not change any of the names of the files or sub-folders inside the image folder, as the program uses specific, standardised naming rules to find the necessary files. For more information, visit the README file in the `sat-images` directory.

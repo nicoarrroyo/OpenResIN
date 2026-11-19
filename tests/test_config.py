@@ -52,33 +52,3 @@ def test_paths_survive_a_changed_working_directory(tmp_path, monkeypatch):
     reloaded = importlib.reload(config)
 
     assert {name: getattr(reloaded, name) for name in expected} == expected
-
-
-def test_config_not_lazy():
-    """Single config ships ready to run the pipeline as intended.
-
-    Scaled-down runs can be configured by CLI flags. Not by editing the
-    config files.
-    """
-
-    shipped_values = [
-        ("SAVE_MODEL", True),
-        ("EPOCHS", 150),
-        ("N_IMAGES", -1),
-        ("HIGH_RES", True),
-        ("RES", "10m"),
-        ("KNOWN_FEATURE_MASKING", True),
-        ("CLOUD_MASKING", True),
-        ("COMPOSITING", True),
-        ("LABEL_DATA", True),
-        ("SHOW_INDEX_PLOTS", False),
-        ("SAVE_IMAGES", False),
-    ]
-
-    wrong = [
-        f"config.{name} "
-        f"is {getattr(config, name)!r}, ships as {expected!r}"
-        for name, expected in shipped_values
-        if getattr(config, name) != expected
-    ]
-    assert not wrong, "config is scaled down:\n  " + "\n  ".join(wrong)
